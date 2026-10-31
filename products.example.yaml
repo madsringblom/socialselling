@@ -1,0 +1,30 @@
+# Copy to products.yaml and describe your own products. products.yaml is git-ignored.
+# search_phrases, problems_solved, not_for, subreddits and non_english_subreddits drive the prefilter;
+# everything except search_phrases and the subreddit lists also goes into the Claude scoring prompt.
+# Tuning tips are in README.md.
+
+products:
+  - id: example-app
+    name: Example App
+    url: https://example.com
+    one_liner: "A simple invoice tracker for solo freelancers."
+    target_user: "Freelancers who lose track of which clients have paid."
+    problems_solved:
+      - "I lose hours every month tracking who paid"
+      - "Spreadsheets for invoices are a mess"
+      - "I forget to chase late payments"
+    key_features:
+      - "One list of sent, due and paid invoices"
+      - "Reminder only when something is late"
+      - "Simple client overview"
+    not_for:
+      - "Accounting or bookkeeping software"
+      - "Enterprise billing"
+    search_phrases:
+      - "track invoices as a freelancer"
+      - "chasing late payments"
+      - "simple invoicing tool"
+    subreddits:
+      - freelance
+      - smallbusiness
+    non_english_subreddits: []
