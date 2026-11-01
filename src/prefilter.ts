@@ -1,4 +1,5 @@
-import type { Product } from "./config.ts";
+import { SLOW_WINDOW_S, SOCIAL_WINDOW_S } from "./config.ts";
+import type { Config } from "./config.ts";
 import type { Item } from "./db.ts";
 
 export type PrefilterResult = {
@@ -12,16 +13,18 @@ export type PrefilterResult = {
 type Cluster = { text: string; words: RegExp[] };
 type ProductMatcher = {
   id: string;
-  subs: Set<string>;
+  /** channelKey()s this product owns: its subreddits, competitor apps, news queries and feeds. */
+  channels: Set<string>;
   phrases: { text: string; re: RegExp }[];
   problems: Cluster[];
   notFor: Cluster[];
 };
-export type Matchers = { products: ProductMatcher[]; nonEnglishSubs: Set<string> };
+export type Matchers = { products: ProductMatcher[]; nonEnglishChannels: Set<string> };
 
-const MAX_AGE_S = 36 * 3600;
 const MIN_LEN_POST = 80;
 const MIN_LEN_COMMENT = 120;
+const MIN_LEN_REVIEW = 20;
+const MIN_LEN_ARTICLE = 40;
 const PHRASE_HIT_CAP = 2;
 
 export const INTENT_RE =
@@ -85,7 +88,10 @@ function distinctiveWords(text: string, docFreq: Map<string, number>): string[] 
     .slice(0, k);
 }
 
-export function compileMatchers(products: Product[]): Matchers {
+export const channelKey = (source: string, channel: string) => `${source}:${channel.toLowerCase()}`;
+
+export function compileMatchers(cfg: Config): Matchers {
+  const { products, feeds } = cfg;
   const docFreq = new Map<string, number>();
   for (const p of products) {
     for (const text of [...p.problems_solved, ...p.not_for]) {
@@ -93,12 +99,23 @@ export function compileMatchers(products: Product[]): Matchers {
     }
   }
   const cluster = (text: string): Cluster => ({ text, words: distinctiveWords(text, docFreq).map(wordPrefixRe) });
-  const nonEnglishSubs = new Set(products.flatMap((p) => p.non_english_subreddits.map((s) => s.toLowerCase())));
+  // Reviews and Bing queries are Danish by design; feeds opt in with lang other than "en".
+  const nonEnglishChannels = new Set([
+    ...products.flatMap((p) => p.non_english_subreddits.map((s) => channelKey("reddit", s))),
+    ...products.flatMap((p) => p.competitors.map((c) => channelKey("appstore", c.name))),
+    ...products.flatMap((p) => p.news_queries.map((q) => channelKey("rss", q))),
+    ...feeds.filter((f) => f.lang !== "en").map((f) => channelKey("rss", f.name)),
+  ]);
   return {
-    nonEnglishSubs,
+    nonEnglishChannels,
     products: products.map((p) => ({
       id: p.id,
-      subs: new Set(p.subreddits.map((s) => s.toLowerCase())),
+      channels: new Set([
+        ...p.subreddits.map((s) => channelKey("reddit", s)),
+        ...p.competitors.map((c) => channelKey("appstore", c.name)),
+        ...p.news_queries.map((q) => channelKey("rss", q)),
+        ...feeds.filter((f) => !f.products || f.products.includes(p.id)).map((f) => channelKey("rss", f.name)),
+      ]),
       phrases: p.search_phrases.map((text) => ({ text, re: phraseRe(text) })),
       problems: p.problems_solved.map(cluster).filter((c) => c.words.length > 0),
       notFor: p.not_for.map(cluster).filter((c) => c.words.length > 0),
@@ -129,7 +146,10 @@ const quote = (s: string) => `"${s.length > 40 ? `${s.slice(0, 40)}…` : s}"`;
  */
 export function prefilterItem(item: Item, m: Matchers, now: number): PrefilterResult {
   const isPost = item.kind === "post";
-  const own = isPost ? `${item.title}\n${item.body}` : item.body;
+  const isComment = item.kind === "comment";
+  const isSocial = isPost || isComment;
+  const own = isComment ? item.body : `${item.title}\n${item.body}`;
+  const minLen = isPost ? MIN_LEN_POST : isComment ? MIN_LEN_COMMENT : item.kind === "review" ? MIN_LEN_REVIEW : MIN_LEN_ARTICLE;
   const reject = (reason: string, lang: "en" | "other" = "en"): PrefilterResult => ({
     pass: false,
     localScore: 0,
@@ -142,17 +162,30 @@ export function prefilterItem(item: Item, m: Matchers, now: number): PrefilterRe
     return reject("removed/deleted");
   }
   if (item.author === "AutoModerator") return reject("AutoModerator");
-  if (own.trim().length < (isPost ? MIN_LEN_POST : MIN_LEN_COMMENT)) return reject("too short");
-  if (now - item.created_at > MAX_AGE_S) return reject("older than 36h");
+  if (own.trim().length < minLen) return reject("too short");
+  if (now - item.created_at > (isSocial ? SOCIAL_WINDOW_S : SLOW_WINDOW_S)) {
+    return reject(isSocial ? "older than 36h" : "older than 30d");
+  }
   const isAskHn = ASK_HN_RE.test(item.title);
   if (HIRING_RE.test(item.title) || (THREAD_RE.test(item.title) && !isAskHn)) return reject("megathread");
 
   const lang = detectLang(own);
-  const sub = item.subreddit.toLowerCase();
-  if (lang === "other" && (item.source !== "reddit" || !m.nonEnglishSubs.has(sub))) {
-    return reject("non-English", "other");
-  }
+  const key = channelKey(item.source, item.subreddit);
+  if (lang === "other" && !m.nonEnglishChannels.has(key)) return reject("non-English", "other");
   if (isPost && isPromotional(item.body)) return reject("promotional", lang);
+
+  if (item.kind === "review") {
+    const owners = m.products.filter((p) => p.channels.has(key)).map((p) => p.id);
+    if (owners.length === 0) return reject("review: unmapped competitor", lang);
+    const low = item.rating != null && item.rating <= 3;
+    return {
+      pass: true,
+      localScore: low ? 3 : 2,
+      productHints: owners,
+      reason: `review of ${item.subreddit}${item.rating != null ? ` (${item.rating}/5)` : ""}`,
+      lang,
+    };
+  }
 
   const intent = INTENT_RE.test(own);
   let base = 0;
@@ -189,7 +222,7 @@ export function prefilterItem(item: Item, m: Matchers, now: number): PrefilterRe
         hits.push(`not_for ${quote(c.text)}`);
       }
     }
-    return { id: p.id, score, hits, inSub: p.subs.has(sub) };
+    return { id: p.id, score, hits, inChannel: p.channels.has(key) };
   });
 
   const best = Math.max(0, ...perProduct.map((p) => p.score));
@@ -197,12 +230,12 @@ export function prefilterItem(item: Item, m: Matchers, now: number): PrefilterRe
   const ranked = [...perProduct].sort((a, b) => b.score - a.score);
   const productHints = [
     ...ranked.filter((p) => p.score > 0).map((p) => p.id),
-    ...ranked.filter((p) => p.score <= 0 && p.inSub).map((p) => p.id),
+    ...ranked.filter((p) => p.score <= 0 && p.inChannel).map((p) => p.id),
   ];
-  const inProductSub = perProduct.some((p) => p.inSub);
-  // Without a phrase/problem hit, only intent in one of a product's own subs passes;
+  const inProductChannel = perProduct.some((p) => p.inChannel);
+  // Without a phrase/problem hit, only intent in one of a product's own channels passes;
   // "?" and "Ask HN" add to the score but never pass an item on their own.
-  const pass = best > 0 ? localScore >= 2 : inProductSub && intent;
+  const pass = best > 0 ? localScore >= 2 : inProductChannel && intent;
   const details = [...why, ...ranked.flatMap((p) => p.hits.map((h) => `${p.id}: ${h}`))];
   return {
     pass,

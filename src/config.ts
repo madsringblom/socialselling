@@ -12,6 +12,28 @@ export const STATS_PATH = join(DATA_DIR, "stats.jsonl");
 export const PRODUCTS_PATH = join(ROOT, "products.yaml");
 
 const Subreddit = z.string().regex(/^[A-Za-z0-9_]+$/, "subreddit without r/ prefix");
+const Country = z.string().regex(/^[a-z]{2}$/, "two-letter lowercase storefront code, e.g. dk");
+
+const CompetitorSchema = z.object({
+  name: z.string().min(1),
+  app_store: z
+    .object({
+      id: z.union([z.number().int().positive(), z.string().regex(/^\d+$/)]).transform(String),
+      countries: z.array(Country).min(1).default(["dk"]),
+    })
+    .optional(),
+  /** Reserved for a later Google Play strategy (package name, e.g. com.spond.spond). Accepted, not collected. */
+  google_play: z.string().optional(),
+});
+
+const FeedSchema = z.object({
+  name: z.string().min(1),
+  url: z.url(),
+  /** Product ids this feed is relevant to; default: all products. */
+  products: z.array(z.string()).optional(),
+  /** Anything other than "en" lets non-English items through the prefilter. */
+  lang: z.string().default("en"),
+});
 
 const ProductSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/, "id must be lowercase letters, digits and dashes"),
@@ -26,21 +48,35 @@ const ProductSchema = z.object({
   subreddits: z.array(Subreddit).default([]),
   /** Subs where non-English items are kept (flagged) and the English phrase search is skipped. */
   non_english_subreddits: z.array(Subreddit).default([]),
+  competitors: z.array(CompetitorSchema).default([]),
+  news_queries: z.array(z.string().min(1)).default([]),
 });
 
-const ProductsFileSchema = z.object({ products: z.array(ProductSchema).min(1) });
+const ConfigSchema = z.object({
+  products: z.array(ProductSchema).min(1),
+  feeds: z.array(FeedSchema).default([]),
+});
 
 export type Product = z.infer<typeof ProductSchema>;
+export type Config = z.infer<typeof ConfigSchema>;
 
-export function loadProducts(path = PRODUCTS_PATH): Product[] {
-  const parsed = ProductsFileSchema.safeParse(parse(readFileSync(path, "utf8")));
+export const SOCIAL_WINDOW_S = 36 * 3600;
+export const SLOW_WINDOW_S = 30 * 86400; // reviews and articles: low volume, kept 30 days
+
+export function loadConfig(path = PRODUCTS_PATH): Config {
+  const parsed = ConfigSchema.safeParse(parse(readFileSync(path, "utf8")));
   if (!parsed.success) {
     throw new Error(`${path} is invalid:\n${z.prettifyError(parsed.error)}`);
   }
   const ids = parsed.data.products.map((p) => p.id);
   const dupe = ids.find((id, i) => ids.indexOf(id) !== i);
   if (dupe) throw new Error(`${path}: duplicate product id "${dupe}"`);
-  return parsed.data.products;
+  for (const f of parsed.data.feeds) {
+    for (const id of f.products ?? []) {
+      if (!ids.includes(id)) throw new Error(`${path}: feed "${f.name}" references unknown product "${id}"`);
+    }
+  }
+  return parsed.data;
 }
 
 function intEnv(name: string, fallback: number): number {

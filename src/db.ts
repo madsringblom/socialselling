@@ -1,15 +1,16 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
-import { DATA_DIR, DB_PATH } from "./config.ts";
+import { DATA_DIR, DB_PATH, SLOW_WINDOW_S, SOCIAL_WINDOW_S } from "./config.ts";
 
 export type Item = {
   id: string;
-  source: "reddit" | "hn";
-  kind: "post" | "comment";
+  source: "reddit" | "hn" | "appstore" | "rss";
+  kind: "post" | "comment" | "review" | "article";
   url: string;
   title: string;
   body: string;
   author: string;
+  /** Channel label: subreddit, 'hn', competitor app name for reviews, query or feed name for articles. */
   subreddit: string;
   parent_id: string | null;
   created_at: number;
@@ -20,6 +21,7 @@ export type Item = {
   locked: boolean;
   content_hash: string;
   lang: string | null;
+  rating: number | null;
 };
 
 export type Flags = {
@@ -46,6 +48,7 @@ export type ScoreRow = {
   confidence: number;
   reason: string;
   flags: Flags;
+  insight: string | null;
   input_tokens: number;
   output_tokens: number;
   cache_read_tokens: number;
@@ -59,6 +62,7 @@ export type ScoredItem = Item & {
   confidence: number;
   reason: string;
   flags: Flags;
+  insight: string | null;
 };
 
 export type DailyStats = {
@@ -94,7 +98,8 @@ CREATE TABLE IF NOT EXISTS items (
   score_ups INTEGER NOT NULL DEFAULT 0,
   locked INTEGER NOT NULL DEFAULT 0,
   content_hash TEXT NOT NULL DEFAULT '',
-  lang TEXT
+  lang TEXT,
+  rating INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_items_created_at ON items(created_at);
 CREATE INDEX IF NOT EXISTS idx_items_content_hash ON items(content_hash);
@@ -119,7 +124,8 @@ CREATE TABLE IF NOT EXISTS scores (
   run_date TEXT NOT NULL,
   input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
-  cache_read_tokens INTEGER NOT NULL DEFAULT 0
+  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  insight TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_scores_run_date ON scores(run_date);
 CREATE TABLE IF NOT EXISTS daily_stats (
@@ -147,8 +153,18 @@ export function openDb(): Database {
   db.run("PRAGMA journal_mode = WAL;");
   db.run("PRAGMA busy_timeout = 5000;");
   db.run(SCHEMA);
+  ensureColumn(db, "items", "rating", "INTEGER");
+  ensureColumn(db, "scores", "insight", "TEXT");
   conn = db;
   return db;
+}
+
+function ensureColumn(db: Database, table: string, col: string, decl: string): void {
+  const cols = db
+    .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
+    .all()
+    .map((c) => c.name);
+  if (!cols.includes(col)) db.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`);
 }
 
 type ItemRow = Omit<Item, "source" | "kind" | "locked"> & { source: string; kind: string; locked: number };
@@ -158,7 +174,7 @@ function toItem(r: ItemRow): Item {
 }
 
 const ITEM_COLS =
-  "i.id, i.source, i.kind, i.url, i.title, i.body, i.author, i.subreddit, i.parent_id, i.created_at, i.fetched_at, i.found_via, i.num_comments, i.score_ups, i.locked, i.content_hash, i.lang";
+  "i.id, i.source, i.kind, i.url, i.title, i.body, i.author, i.subreddit, i.parent_id, i.created_at, i.fetched_at, i.found_via, i.num_comments, i.score_ups, i.locked, i.content_hash, i.lang, i.rating";
 
 const DUP_WINDOW_S = 7 * 86400;
 
@@ -173,8 +189,8 @@ export function insertItems(items: Item[]): { inserted: number; dups: number } {
   );
   const insert = db.query(
     `INSERT OR IGNORE INTO items
-     (id, source, kind, url, title, body, author, subreddit, parent_id, created_at, fetched_at, found_via, num_comments, score_ups, locked, content_hash, lang)
-     VALUES ($id, $source, $kind, $url, $title, $body, $author, $subreddit, $parent_id, $created_at, $fetched_at, $found_via, $num_comments, $score_ups, $locked, $content_hash, $lang)`,
+     (id, source, kind, url, title, body, author, subreddit, parent_id, created_at, fetched_at, found_via, num_comments, score_ups, locked, content_hash, lang, rating)
+     VALUES ($id, $source, $kind, $url, $title, $body, $author, $subreddit, $parent_id, $created_at, $fetched_at, $found_via, $num_comments, $score_ups, $locked, $content_hash, $lang, $rating)`,
   );
   let inserted = 0;
   let dups = 0;
@@ -238,23 +254,23 @@ export function countScored(runDate: string): number {
   );
 }
 
-const CANDIDATE_WINDOW_S = 36 * 3600;
-
 /**
- * Prefilter-passing items created within the last 36h that have no score yet, by local_score desc.
+ * Prefilter-passing items with no score yet, by local_score desc: posts and comments created
+ * within the last 36h, reviews and articles within the last 30 days.
  * Not scoped to a run_date, so items cut or failed in an earlier run get another chance.
  */
 export function unscoredCandidates(now: number): Candidate[] {
   return openDb()
-    .query<ItemRow & { local_score: number; product_hints: string }, { since: number }>(
+    .query<ItemRow & { local_score: number; product_hints: string }, { since: number; sinceSlow: number }>(
       `SELECT ${ITEM_COLS}, p.local_score, p.product_hints
        FROM prefilter p
        JOIN items i ON i.id = p.item_id
        LEFT JOIN scores s ON s.item_id = p.item_id
-       WHERE p.passed = 1 AND s.item_id IS NULL AND i.created_at >= $since
+       WHERE p.passed = 1 AND s.item_id IS NULL
+         AND i.created_at >= (CASE WHEN i.kind IN ('review','article') THEN $sinceSlow ELSE $since END)
        ORDER BY p.local_score DESC, i.created_at DESC`,
     )
-    .all({ since: now - CANDIDATE_WINDOW_S })
+    .all({ since: now - SOCIAL_WINDOW_S, sinceSlow: now - SLOW_WINDOW_S })
     .map(({ local_score, product_hints, ...row }) => ({
       item: toItem(row),
       localScore: local_score,
@@ -266,8 +282,8 @@ export function saveScores(rows: ScoreRow[], runDate: string, model: string, sco
   const db = openDb();
   const insert = db.query(
     `INSERT OR IGNORE INTO scores
-     (item_id, matched_product, tier, confidence, reason, flags, model, scored_at, run_date, input_tokens, output_tokens, cache_read_tokens)
-     VALUES ($item_id, $matched_product, $tier, $confidence, $reason, $flags, $model, $scored_at, $run_date, $input_tokens, $output_tokens, $cache_read_tokens)`,
+     (item_id, matched_product, tier, confidence, reason, flags, insight, model, scored_at, run_date, input_tokens, output_tokens, cache_read_tokens)
+     VALUES ($item_id, $matched_product, $tier, $confidence, $reason, $flags, $insight, $model, $scored_at, $run_date, $input_tokens, $output_tokens, $cache_read_tokens)`,
   );
   db.transaction(() => {
     for (const r of rows) {
@@ -277,22 +293,30 @@ export function saveScores(rows: ScoreRow[], runDate: string, model: string, sco
 }
 
 export function scoredForDate(runDate: string): ScoredItem[] {
-  type Row = ItemRow & { matched_product: string | null; tier: string; confidence: number; reason: string; flags: string };
+  type Row = ItemRow & {
+    matched_product: string | null;
+    tier: string;
+    confidence: number;
+    reason: string;
+    flags: string;
+    insight: string | null;
+  };
   return openDb()
     .query<Row, { d: string }>(
-      `SELECT ${ITEM_COLS}, s.matched_product, s.tier, s.confidence, s.reason, s.flags
+      `SELECT ${ITEM_COLS}, s.matched_product, s.tier, s.confidence, s.reason, s.flags, s.insight
        FROM scores s JOIN items i ON i.id = s.item_id
        WHERE s.run_date = $d
        ORDER BY s.confidence DESC, i.created_at DESC`,
     )
     .all({ d: runDate })
-    .map(({ matched_product, tier, confidence, reason, flags, ...row }) => ({
+    .map(({ matched_product, tier, confidence, reason, flags, insight, ...row }) => ({
       ...toItem(row),
       matched_product,
       tier,
       confidence,
       reason,
       flags: JSON.parse(flags) as Flags,
+      insight,
     }));
 }
 

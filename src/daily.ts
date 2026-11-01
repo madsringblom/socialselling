@@ -1,18 +1,16 @@
 import { mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { collectHn, collectReddit, fetchThreadContext } from "./collect.ts";
-import type { CollectResult } from "./collect.ts";
 import {
   DATA_DIR,
   FETCH_THREAD_CONTEXT,
   LOCK_PATH,
   MAX_SCORED_PER_DAY,
   MODEL,
-  loadProducts,
+  loadConfig,
   localTime,
   requireApiKey,
   runDate,
 } from "./config.ts";
-import type { Product } from "./config.ts";
+import type { Config } from "./config.ts";
 import {
   countPassed,
   countScored,
@@ -31,14 +29,15 @@ import { compileMatchers, prefilterItem, selectCandidates } from "./prefilter.ts
 import { leadCount, renderReport, tallyLeads, writeStatsFile } from "./report.ts";
 import { SCORING_BODY_MAX, scoreItems } from "./score.ts";
 import type { ScoreInput } from "./score.ts";
+import { STRATEGIES, fetchThreadContext } from "./strategies/index.ts";
+import type { CollectResult } from "./strategies/index.ts";
+import { errMsg } from "./strategies/shared.ts";
 
 const LOCK_MAX_AGE_MS = 2 * 3600 * 1000;
 
 function log(msg: string): void {
   console.log(`${localTime(new Date(), true)} ${msg}`);
 }
-
-const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 function parseArgs(argv: string[]): { reportOnly: boolean; date?: string } {
   const reportOnly = argv.includes("--report-only");
@@ -96,7 +95,8 @@ function dedupeById(items: Item[]): Item[] {
   return [...seen.values()];
 }
 
-async function runDaily(products: Product[]): Promise<void> {
+async function runDaily(cfg: Config): Promise<void> {
+  const products = cfg.products;
   const started = Date.now();
   const now = Math.floor(started / 1000);
   const errors: string[] = [];
@@ -104,19 +104,27 @@ async function runDaily(products: Product[]): Promise<void> {
   openDb();
   log(`run ${runDate} · model ${MODEL} · products ${products.map((p) => p.id).join(", ")}`);
 
-  const [reddit, hn] = await Promise.all([
-    safeCollect("reddit", () => collectReddit(products, now, log)),
-    safeCollect("hn", () => collectHn(products, now, log)),
-  ]);
-  errors.push(...reddit.errors, ...hn.errors);
-  notes.push(...reddit.notes, ...hn.notes);
-  const fetched = dedupeById([...reddit.items, ...hn.items]);
-  log(`fetched ${fetched.length} (reddit ${reddit.items.length}, hn ${hn.items.length})`);
+  const active = STRATEGIES.filter((s) => {
+    const on = s.enabled(cfg);
+    if (on === true) return true;
+    notes.push(on);
+    log(`${s.id}: skipped (${on})`);
+    return false;
+  });
+  const results = await Promise.all(active.map((s) => safeCollect(s.id, () => s.collect(cfg, now, log))));
+  for (const r of results) {
+    errors.push(...r.errors);
+    notes.push(...r.notes);
+  }
+  const fetched = dedupeById(results.flatMap((r) => r.items));
+  const breakdown = active.map((s, i) => `${s.id} ${results[i]!.items.length}`).join(", ");
+  log(`fetched ${fetched.length} (${breakdown})`);
+  notes.push(`fetched: ${breakdown}`);
 
   const { inserted, dups } = insertItems(fetched);
   log(`new ${inserted} (${dups} content duplicates)`);
 
-  const matchers = compileMatchers(products);
+  const matchers = compileMatchers(cfg);
   const pending = itemsPendingPrefilter();
   const rows: PrefilterRow[] = pending.map((item) => {
     if (item.found_via.startsWith("dup:")) {
@@ -165,7 +173,7 @@ async function runDaily(products: Product[]): Promise<void> {
   const inputs: ScoreInput[] = selected.map(({ item, hints }) => ({
     id: item.id,
     source: item.source,
-    subreddit: item.subreddit,
+    channel: item.subreddit,
     kind: item.kind,
     ageH: (now - item.created_at) / 3600,
     title: item.title,
@@ -173,6 +181,7 @@ async function runDaily(products: Product[]): Promise<void> {
     topReplies: replies.get(item.id),
     numComments: item.num_comments,
     locked: item.locked,
+    rating: item.rating,
     hints,
   }));
   log(`score: ${inputs.length} candidates${cut > 0 ? ` (${cut} cut)` : ""}`);
@@ -200,17 +209,17 @@ async function runDaily(products: Product[]): Promise<void> {
     notes: JSON.stringify([...notes, ...errors]),
   };
   upsertDailyStats(stats);
-  const path = renderReport(runDate, products);
+  const path = renderReport(runDate, cfg);
   writeStatsFile();
   log(`done: ${leadCount(tally)} leads · ${errors.length} errors · report ${path}`);
 }
 
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
-  const products = loadProducts();
+  const cfg = loadConfig();
 
   if (args.reportOnly) {
-    const path = renderReport(args.date ?? runDate, products);
+    const path = renderReport(args.date ?? runDate, cfg);
     writeStatsFile();
     log(`report written: ${path}`);
     return 0;
@@ -222,7 +231,7 @@ async function main(): Promise<number> {
     return 0;
   }
   try {
-    await runDaily(products);
+    await runDaily(cfg);
     return 0;
   } finally {
     releaseLock();

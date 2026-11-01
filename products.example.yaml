@@ -1,6 +1,9 @@
 # Copy to products.yaml and describe your own products. products.yaml is git-ignored.
-# search_phrases, problems_solved, not_for, subreddits and non_english_subreddits drive the prefilter;
-# everything except search_phrases and the subreddit lists also goes into the Claude scoring prompt.
+# problems_solved, key_features, not_for, one_liner and target_user go into the Claude scoring prompt
+# (key_features also decides whether a competitor-review complaint counts as describing_problem);
+# search_phrases, subreddits, competitors, news_queries and feeds only drive collection and the prefilter.
+# competitors (App Store reviews), news_queries (Bing News RSS) and the top-level feeds list (any RSS/Atom URL)
+# add review and article sources; all three are optional.
 # Tuning tips are in README.md.
 
 products:
@@ -28,3 +31,17 @@ products:
       - freelance
       - smallbusiness
     non_english_subreddits: []
+    # Competitor apps whose App Store reviews are collected (id = the number in the apps.apple.com URL).
+    competitors:
+      - name: Competitor Invoices
+        app_store: { id: 123456789, countries: [dk] } # two-letter storefront codes, default [dk]
+        # google_play: com.example.invoices # accepted, not collected yet
+    # Bing News searches (Danish market, non-English results allowed).
+    news_queries: ["freelancer fakturering"]
+
+# Extra RSS 2.0 / Atom feeds, e.g. Google Alerts with delivery set to "RSS feed".
+feeds:
+  - name: Google Alert invoicing
+    url: https://www.google.com/alerts/feeds/00000000000000000000/0000000000000000000
+    products: [example-app] # optional, default: all products
+    lang: en # anything other than "en" keeps non-English entries
