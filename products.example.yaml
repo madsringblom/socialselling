@@ -1,7 +1,9 @@
 # Copy to products.yaml and describe your own products. products.yaml is git-ignored.
 # problems_solved, key_features, not_for, one_liner and target_user go into the Claude scoring prompt
 # (key_features also decides whether a competitor-review complaint counts as describing_problem);
-# search_phrases, subreddits, competitors, news_queries and feeds only drive collection and the prefilter.
+# search_phrases, subreddits, bluesky, competitors, news_queries and feeds only drive collection and the prefilter.
+# search_phrases are searched on Reddit, Hacker News and Bluesky (public search, no key; per-product and
+# top-level bluesky sections are optional, both default to enabled).
 # competitors (App Store reviews), news_queries (Bing News RSS) and the top-level feeds list (any RSS/Atom URL)
 # add review and article sources; all three are optional.
 # Tuning tips are in README.md.
@@ -31,6 +33,10 @@ products:
       - freelance
       - smallbusiness
     non_english_subreddits: []
+    # Bluesky public search (no key). Danish phrases are searched with lang=da and may be non-English.
+    bluesky:
+      enabled: true
+      danish_phrases: ["faktura freelancer", "rykke for betaling"]
     # Competitor apps whose App Store reviews are collected (id = the number in the apps.apple.com URL).
     competitors:
       - name: Competitor Invoices
@@ -45,3 +51,7 @@ feeds:
     url: https://www.google.com/alerts/feeds/00000000000000000000/0000000000000000000
     products: [example-app] # optional, default: all products
     lang: en # anything other than "en" keeps non-English entries
+
+bluesky:
+  enabled: true
+  own_handles: [] # your own Bluesky handles, e.g. me.bsky.social; their posts are skipped

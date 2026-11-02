@@ -1,8 +1,8 @@
 # SocialSelling: validation layer
 
-Read-only social listening. Once a day it pulls recent items from four sources (Reddit and Hacker News posts and comments, App Store reviews of competitor apps, and news/feed articles), keeps the ones that look like someone has a problem one of the products in `products.yaml` solves (or that say something useful about a competitor), has Claude classify them, and writes `reports/YYYY-MM-DD.md`. It never posts, replies or votes.
+Read-only social listening. Once a day it pulls recent items from five sources (Reddit, Hacker News and Bluesky posts and comments, App Store reviews of competitor apps, and news/feed articles), keeps the ones that look like someone has a problem one of the products in `products.yaml` solves (or that say something useful about a competitor), has Claude classify them, and writes `reports/YYYY-MM-DD.md`. It never posts, replies or votes.
 
-Pipeline: collect (Reddit, HN, App Store, Bing News/RSS; each source is a strategy in `src/strategies/`) → SQLite (`data/social.db`) → keyword prefilter → optional thread context → Claude scoring (batches of 10) → markdown report + `data/stats.jsonl`.
+Pipeline: collect (Reddit, HN, Bluesky, App Store, Bing News/RSS; each source is a strategy in `src/strategies/`) → SQLite (`data/social.db`) → keyword prefilter → optional thread context → Claude scoring (batches of 10) → markdown report + `data/stats.jsonl`.
 
 ## Setup
 
@@ -24,7 +24,7 @@ cp products.example.yaml products.yaml  # describe your products (git-ignored)
 
 ## Sources
 
-A source whose config is missing is skipped with a one-line note in the report (for example "appstore skipped: no competitors[].app_store in products.yaml"); the other sources run as usual. The report's notes also list how many items each source fetched. App Store and RSS requests share one polite fetcher: at least 1s between requests to the same host, 20s timeout, no retries.
+A source whose config is missing is skipped with a one-line note in the report (for example "appstore skipped: no competitors[].app_store in products.yaml"); the other sources run as usual. The report's notes also list how many items each source fetched. App Store, Bluesky and RSS requests share one polite fetcher: at least 1s between requests to the same host, 20s timeout, no retries.
 
 ### Reddit
 
@@ -44,6 +44,10 @@ Without `REDDIT_CLIENT_ID`/`REDDIT_CLIENT_SECRET` the run still works: Reddit (a
 ### Hacker News
 
 The public Algolia HN search API, no key needed: up to 20 `search_phrases` (round-robin across products) plus the latest Ask HN posts, stories and comments from the last 36h.
+
+### Bluesky
+
+The public AT Protocol AppView at `api.bsky.app` (`app.bsky.feed.searchPosts`), no key or account needed: up to 20 `search_phrases` (round-robin across products) plus up to 20 `bluesky.danish_phrases` searched with `lang=da`. Each phrase fetches the 50 latest posts (`sort=latest`) from the last 36h (one page of 50 per phrase, no pagination), at 1 request/s. Replies are kept only when the phrase itself appears in the reply; posts from the top-level `bluesky.own_handles` are skipped. `public.api.bsky.app` returns 403 for search, which is why `api.bsky.app` is used. Set `bluesky.enabled: false` on a product to leave its phrases out, or `bluesky.enabled: false` at the top level to turn the source off.
 
 ### App Store reviews
 
@@ -85,7 +89,7 @@ Unload with `launchctl bootout gui/$(id -u)/com.socialselling.daily`. The 07:00 
 
 ## Tuning `products.yaml`
 
-- `search_phrases`: drive the Reddit/HN searches and give +3 each in the prefilter (max 2 hits). Use phrases people actually write ("feast or famine"), not marketing copy.
+- `search_phrases`: drive the Reddit/HN/Bluesky searches and give +3 each in the prefilter (max 2 hits). Use phrases people actually write ("feast or famine"), not marketing copy.
 - `problems_solved`: each is reduced to its 2-3 most distinctive words; an item containing all of them gets +2. Short, concrete wording works best. All of it also goes into the Claude prompt.
 - `not_for`: a keyword hit gives -2, and Claude treats matches as non-leads.
 - `subreddits` (no `r/`): scanned for new posts and comments, and searched with the phrases. The report's "Top channels for leads today" section shows where leads come from, so add or drop subs based on that.
@@ -93,15 +97,17 @@ Unload with `launchctl bootout gui/$(id -u)/com.socialselling.daily`. The 07:00 
 - `competitors` (default `[]`): `name` plus optional `app_store: { id, countries }` (id is the number in the apps.apple.com URL, countries are two-letter storefront codes, default `[dk]`) and optional `google_play` (accepted, not collected). Reviews of a competitor are hinted to the product that lists it.
 - `news_queries` (default `[]`): Bing News searches. Short brand or topic terms work best ("Holdsport", "foreningsapp"). All Bing queries allow Danish (non-English) results.
 - `feeds` (top level, default `[]`): `name`, `url`, optional `products` (product ids the feed belongs to, default all) and optional `lang` (default `en`; anything else keeps non-English entries).
+- `bluesky` (per product, optional): `enabled` (default `true`; `false` leaves the product's phrases out of the Bluesky search) and `danish_phrases` (default `[]`): searched with `lang=da`, Bluesky posts found by them may be non-English, and they also count as phrases in the prefilter (+3 each, like `search_phrases`).
+- `bluesky` (top level, optional): `enabled` (default `true`; `false` turns the source off) and `own_handles` (default `[]`): your own Bluesky handles (e.g. `me.bsky.social`, a leading `@` is fine); their posts are skipped.
 - Edits take effect on the next run. Changing product text changes the cached system prompt, so the first batch after a change pays the cache write once.
 
-Pass rule: the score is intent (+2) + `?` in a post title (+1) + `Ask HN` (+1) + the best single product's phrase/problem/not_for score. An item with a product hit (best > 0) passes at score 2 or more. An item with no product hit passes only if it comes from one of a product's `subreddits` and matches the intent regex ("is there a", "looking for a", "recommendations", …). HN items and site-wide search results from other subreddits always need a product hit; `?` and `Ask HN` add to the score but never pass an item on their own.
+Pass rule: the score is intent (+2) + `?` in a post title (+1) + `Ask HN` (+1) + the best single product's phrase/problem/not_for score. An item with a product hit (best > 0) passes at score 2 or more. An item with no product hit passes only if it comes from one of a product's `subreddits` and matches the intent regex ("is there a", "looking for a", "recommendations", …). Bluesky posts found via one of a product's phrases count as being in that product's channel, so intent alone passes them. HN items and site-wide search results from other subreddits always need a product hit; `?` and `Ask HN` add to the score but never pass an item on their own.
 
 Reviews always pass (if their competitor is in some product's `competitors`): the hint is that product, with score 3 for 3 stars or fewer and 2 otherwise. Articles follow the same rule as posts: they need a phrase/problem hit, or intent plus a channel (news query or feed) mapped to a product. Age windows: 36h for posts and comments, 30 days for reviews and articles. Minimum lengths: 80 characters for posts, 120 for comments, 20 for reviews, 40 for articles.
 
 ## Report
 
-`reports/YYYY-MM-DD.md` starts with the funnel, tier and product counts and a "By kind" line (non-irrelevant items split into social, reviews and articles), then the week-to-date table. The `asking_for_tool`, `describing_problem` and `passing_mention` sections only list Reddit/HN items. Two extra sections:
+`reports/YYYY-MM-DD.md` starts with the funnel, tier and product counts and a "By kind" line (non-irrelevant items split into social, reviews and articles), then the week-to-date table. The `asking_for_tool`, `describing_problem` and `passing_mention` sections only list Reddit/HN/Bluesky items. Two extra sections:
 
 - **Competitor reviews** (shown when any product has `competitors`): one group per competitor with star rating, storefront, tier, product, confidence, a body excerpt and Claude's one-line insight (feature gap, switching reason); irrelevant reviews that still carry an insight are listed as one line each, the rest are only counted.
 - **News & feeds** (shown when any `news_queries` or `feeds` are configured): headline, publication, query or feed, tier and insight; irrelevant articles that still carry an insight are listed as one line each, the rest are only counted.

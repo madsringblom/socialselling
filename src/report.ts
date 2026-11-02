@@ -59,11 +59,13 @@ const storefront = (r: ScoredItem) => r.id.split(":")[1] ?? "";
 const where = (r: ScoredItem) =>
   r.source === "hn"
     ? "HN"
-    : r.source === "reddit"
-      ? `r/${r.subreddit}`
-      : r.source === "appstore"
-        ? `App Store ${r.subreddit} (${storefront(r)})`
-        : r.subreddit;
+    : r.source === "bluesky"
+      ? "Bluesky"
+      : r.source === "reddit"
+        ? `r/${r.subreddit}`
+        : r.source === "appstore"
+          ? `App Store ${r.subreddit} (${storefront(r)})`
+          : r.subreddit;
 const stars = (n: number | null) => {
   if (n == null) return "";
   const k = Math.max(0, Math.min(5, Math.round(n)));

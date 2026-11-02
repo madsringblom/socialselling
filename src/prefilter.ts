@@ -13,7 +13,7 @@ export type PrefilterResult = {
 type Cluster = { text: string; words: RegExp[] };
 type ProductMatcher = {
   id: string;
-  /** channelKey()s this product owns: its subreddits, competitor apps, news queries and feeds. */
+  /** channelKey()s this product owns: its subreddits, competitor apps, news queries, feeds and Bluesky phrases. */
   channels: Set<string>;
   phrases: { text: string; re: RegExp }[];
   problems: Cluster[];
@@ -74,7 +74,8 @@ function wordPrefixRe(w: string): RegExp {
   return new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(stem(w))}`, "iu");
 }
 
-function phraseRe(phrase: string): RegExp {
+/** Whole-word, case-insensitive match of a phrase; also used by the Bluesky strategy to vet replies. */
+export function phraseRe(phrase: string): RegExp {
   const body = escapeRe(phrase.trim()).replace(/\s+/g, "\\s+");
   return new RegExp(`(?<![\\p{L}\\p{N}])${body}(?![\\p{L}\\p{N}])`, "iu");
 }
@@ -99,11 +100,12 @@ export function compileMatchers(cfg: Config): Matchers {
     }
   }
   const cluster = (text: string): Cluster => ({ text, words: distinctiveWords(text, docFreq).map(wordPrefixRe) });
-  // Reviews and Bing queries are Danish by design; feeds opt in with lang other than "en".
+  // Reviews, Bing queries and Bluesky Danish phrases are Danish by design; feeds opt in with lang other than "en".
   const nonEnglishChannels = new Set([
     ...products.flatMap((p) => p.non_english_subreddits.map((s) => channelKey("reddit", s))),
     ...products.flatMap((p) => p.competitors.map((c) => channelKey("appstore", c.name))),
     ...products.flatMap((p) => p.news_queries.map((q) => channelKey("rss", q))),
+    ...products.flatMap((p) => p.bluesky.danish_phrases.map((q) => channelKey("bluesky", q))),
     ...feeds.filter((f) => f.lang !== "en").map((f) => channelKey("rss", f.name)),
   ]);
   return {
@@ -115,8 +117,12 @@ export function compileMatchers(cfg: Config): Matchers {
         ...p.competitors.map((c) => channelKey("appstore", c.name)),
         ...p.news_queries.map((q) => channelKey("rss", q)),
         ...feeds.filter((f) => !f.products || f.products.includes(p.id)).map((f) => channelKey("rss", f.name)),
+        ...[...p.search_phrases, ...p.bluesky.danish_phrases].map((q) => channelKey("bluesky", q)),
       ]),
-      phrases: p.search_phrases.map((text) => ({ text, re: phraseRe(text) })),
+      phrases: [...new Set([...p.search_phrases, ...p.bluesky.danish_phrases])].map((text) => ({
+        text,
+        re: phraseRe(text),
+      })),
       problems: p.problems_solved.map(cluster).filter((c) => c.words.length > 0),
       notFor: p.not_for.map(cluster).filter((c) => c.words.length > 0),
     })),
@@ -148,7 +154,8 @@ export function prefilterItem(item: Item, m: Matchers, now: number): PrefilterRe
   const isPost = item.kind === "post";
   const isComment = item.kind === "comment";
   const isSocial = isPost || isComment;
-  const own = isComment ? item.body : `${item.title}\n${item.body}`;
+  // Bluesky titles are the first line of the body, so the body alone is the author's text.
+  const own = isComment || item.source === "bluesky" ? item.body : `${item.title}\n${item.body}`;
   const minLen = isPost ? MIN_LEN_POST : isComment ? MIN_LEN_COMMENT : item.kind === "review" ? MIN_LEN_REVIEW : MIN_LEN_ARTICLE;
   const reject = (reason: string, lang: "en" | "other" = "en"): PrefilterResult => ({
     pass: false,
