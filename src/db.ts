@@ -923,6 +923,14 @@ export function upsertLead(l: LeadRow): void {
     });
 }
 
+/** Leads whose last_researched is exactly `date` (YYYY-MM-DD): used for the daily research cap. */
+export function countLeadsResearchedOn(date: string): number {
+  return (
+    openDb().query<{ n: number }, { d: string }>("SELECT COUNT(*) AS n FROM leads WHERE last_researched = $d").get({ d: date })
+      ?.n ?? 0
+  );
+}
+
 export function setLeadStatus(id: string, status: LeadStatus): void {
   openDb().query("UPDATE leads SET status = $status WHERE id = $id").run({ id, status });
 }

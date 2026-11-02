@@ -7,8 +7,9 @@ import { readFileSync } from "node:fs";
 import { loadConfig, localDate } from "./config.ts";
 import type { Config } from "./config.ts";
 import { getLead, insertEntity, upsertLead } from "./db.ts";
-import type { Classification, Contact, LeadRow, MemberCount, ScoreComponent, ScoreJson, Signal, StackEntry } from "./db.ts";
+import type { Contact, LeadRow, MemberCount, ScoreComponent, ScoreJson, Signal, StackEntry } from "./db.ts";
 import { canonicalDomain, normalizeName } from "./plays/entities.ts";
+import { scoreLead } from "./plays/leadscore.ts";
 import { errMsg } from "./strategies/shared.ts";
 
 /** The subset of the mio-lead-research lead record (mio-leads/README.md) that is imported. */
@@ -46,7 +47,6 @@ type RawLead = {
   mio_opportunity_hypothesis?: string | null;
 };
 
-const CLASSIFICATIONS: Classification[] = ["HOT", "STRONG", "WATCH", "ARCHIVE"];
 const EMPTY_COMPONENT: ScoreComponent = { points: 0, basis: "not recorded", evidence_url: null };
 
 function component(c: ScoreComponent | undefined): ScoreComponent {
@@ -71,7 +71,6 @@ export function mapLead(raw: RawLead, productId: string, today = localDate()): L
     },
     negative_adjustments: os.negative_adjustments ?? [],
   };
-  const classification = CLASSIFICATIONS.find((c) => c === os.classification) ?? "ARCHIVE";
   const firstSeen = raw.first_seen || today;
 
   return {
@@ -122,10 +121,8 @@ export function mapLead(raw: RawLead, productId: string, today = localDate()): L
           ]
         : [],
     ),
-    score,
-    // Phase 2 switches these to scoreLead(score); for now the record's own values are kept.
-    total: typeof os.total === "number" ? os.total : 0,
-    classification,
+    // Recomputed with the rubric's rules (clamps, evidence URLs); the record's own total is not trusted.
+    ...scoreLead(score),
     pain_hypothesis: raw.pain_hypothesis ?? null,
     opportunity_hypothesis: raw.mio_opportunity_hypothesis ?? null,
     call_brief: null,
