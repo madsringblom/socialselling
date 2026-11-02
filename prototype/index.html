@@ -1,0 +1,1726 @@
+<title>SocialSelling</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap">
+<style>
+/*
+  Design plan: SocialSelling prototype
+  Layout: one calm work surface. Mobile: single column, sticky compact header (52px),
+  fixed bottom nav with four tabs. Desktop (>=1024px): 200px left rail; Today and Pipeline
+  use a 360px list column plus a detail column (flex 1, max 720px); Intel and Setup are a
+  single column, max 760px.
+  Color: quiet grey-green neutrals and one sea-teal accent. Semantic good / warn / crit are
+  kept separate from the accent. Classification: HOT = crit, STRONG = accent,
+  WATCH = warn, ARCHIVE = muted.
+  Type: Figtree for UI, Fraunces for page titles only, system mono for scores, counts and
+  timestamps. Scale 13 / 14 (body) / 16 / 20 / 26. Eyebrows 12px uppercase, .06em tracking.
+  Shape: 10px radius on cards, buttons and fields; 999px on pills and chips; 1px line
+  borders; no shadows. Spacing 4 / 8 / 12 / 16 / 24 / 32. Controls 40px tall, 44px tap area.
+*/
+:root {
+  --bg: #F7F8F8;
+  --surface: #FFFFFF;
+  --surface-2: #EFF3F3;
+  --fg: #17201F;
+  --fg-muted: #5A6866;
+  --line: #DCE3E2;
+  --accent: #0A6665;
+  --accent-soft: #DDF1F0;
+  --on-accent: #FFFFFF;
+  --good: #2E7D4F;
+  --good-soft: #EAF5EE;
+  --warn: #8F5500;
+  --warn-soft: #FBF0DF;
+  --crit: #B23B3B;
+  --crit-soft: #F9E5E4;
+
+  --font-ui: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius: 10px;
+  --radius-pill: 999px;
+  --control: 40px;
+  --header-h: 52px;
+  --nav-h: 60px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121517;
+    --surface: #1A1F22;
+    --surface-2: #232A2E;
+    --fg: #E8ECEB;
+    --fg-muted: #A3AEAC;
+    --line: #2C3539;
+    --accent: #4FB3B1;
+    --accent-soft: #173A39;
+    --on-accent: #0B1414;
+    --good: #6CC08B;
+    --good-soft: #1B3326;
+    --warn: #E0A64A;
+    --warn-soft: #3A2D14;
+    --crit: #E07070;
+    --crit-soft: #3D2121;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121517;
+  --surface: #1A1F22;
+  --surface-2: #232A2E;
+  --fg: #E8ECEB;
+  --fg-muted: #A3AEAC;
+  --line: #2C3539;
+  --accent: #4FB3B1;
+  --accent-soft: #173A39;
+  --on-accent: #0B1414;
+  --good: #6CC08B;
+  --good-soft: #1B3326;
+  --warn: #E0A64A;
+  --warn-soft: #3A2D14;
+  --crit: #E07070;
+  --crit-soft: #3D2121;
+  color-scheme: dark;
+}
+
+/* Base */
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 400 14px/1.5 var(--font-ui);
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, p, ul, ol, blockquote { margin: 0; }
+ul { padding: 0; list-style: none; }
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* Shell */
+.app {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: env(safe-area-inset-top, 0px) calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 32px);
+  min-height: 100vh;
+}
+.main { min-width: 0; }
+.brand { display: none; }
+.icon { width: 20px; height: 20px; flex: none; }
+.icon-sm { width: 14px; height: 14px; flex: none; }
+
+.nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.nav-btn {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--nav-h);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.nav-btn:where(:hover) { color: var(--fg); }
+.nav-btn:focus-visible { outline-offset: -4px; }
+.nav-btn::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 25%;
+  right: 25%;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  opacity: 0;
+}
+.nav-btn[aria-current="page"] { color: var(--accent); }
+.nav-btn[aria-current="page"]::before { opacity: 1; }
+
+.header {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 12px;
+  min-height: var(--header-h);
+  margin-bottom: 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  /* full-bleed background behind the gutters, clipped below the header */
+  box-shadow: 0 0 0 100vmax var(--bg);
+  clip-path: inset(-100vmax -100vmax 0 -100vmax);
+}
+.header-title {
+  order: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--header-h);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.page-title {
+  min-width: 0;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 20px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header-meta {
+  order: 2;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.header-date { font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
+.header-layout {
+  order: 3;
+  flex: 1 0 100%;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.view { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.split { min-width: 0; }
+.col-list { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.col-detail { min-width: 0; }
+.single { display: flex; flex-direction: column; gap: 24px; max-width: 760px; min-width: 0; }
+
+/* Text helpers */
+.eyebrow {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.meta { font-size: 13px; color: var(--fg-muted); }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.strong { font-weight: 600; }
+.end { text-align: right; }
+.wrap { overflow-wrap: anywhere; min-width: 0; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.line-1 { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.text-warn { color: var(--warn); }
+.text-crit { color: var(--crit); }
+.inline-icon { display: inline-flex; align-items: center; gap: 4px; }
+.stack-4 { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.stack-8 { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.link {
+  display: inline-block;
+  max-width: 100%;
+  padding-block: 12px;
+  margin-block: -12px;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+  text-underline-offset: 2px;
+}
+.divider { width: 100%; margin: 8px 0; border: 0; border-top: 1px solid var(--line); }
+
+/* Funnel */
+.funnel { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; }
+.funnel-item { white-space: nowrap; }
+
+/* Sections and cards */
+.section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; }
+.cards { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.grid-2 { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  scroll-margin-top: 80px;
+}
+.card-click { cursor: pointer; }
+.card-click:where(:hover) { border-color: var(--fg-muted); }
+.is-selected { border-left: 3px solid var(--accent); padding-left: 14px; }
+.card-title { min-width: 0; font-size: 16px; font-weight: 600; line-height: 1.35; }
+.card-hit {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.card-hit::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: 1;
+  border-radius: var(--radius);
+}
+.card-hit:focus-visible { outline: none; }
+.card-hit:focus-visible::after { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.card-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.lead-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; }
+.score-box { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.score { font-size: 20px; font-weight: 600; line-height: 1; color: var(--fg); }
+.score-big { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 26px; font-weight: 600; line-height: 1; }
+
+.inset {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+}
+.quote { padding-left: 12px; border-left: 2px solid var(--line); }
+
+.detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.detail-title { font-size: 20px; font-weight: 600; line-height: 1.3; }
+.detail-title:focus { outline: none; }
+.display { font-family: var(--font-display); font-weight: 500; }
+
+/* Rows inside cards */
+.rows { display: flex; flex-direction: column; min-width: 0; }
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding-block: 12px;
+  border-top: 1px solid var(--line);
+}
+:where(.row):first-child { border-top: 0; padding-top: 0; }
+:where(.row):last-child { padding-bottom: 0; }
+.row-focus {
+  padding-block: 12px;
+  padding-inline: 8px;
+  margin-inline: -8px;
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+}
+.brief { display: grid; gap: 8px; padding-left: 20px; list-style: disc; }
+
+/* Bars */
+.bar-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) 48px; gap: 12px; align-items: center; }
+.bar { display: block; height: 8px; background: var(--surface-2); border-radius: var(--radius-pill); overflow: hidden; }
+.bar-fill { display: block; height: 100%; background: var(--accent); border-radius: var(--radius-pill); }
+.dist { display: flex; flex-direction: column; gap: 4px; }
+.dist-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) 24px; gap: 8px; align-items: center; }
+
+/* Stars */
+.stars { white-space: nowrap; letter-spacing: 1px; }
+.star-on { color: var(--accent); }
+.star-off { color: var(--fg-muted); }
+
+/* Chips: static labels */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+.chip-accent { background: var(--accent-soft); color: var(--accent); }
+.chip-hot { background: var(--crit-soft); color: var(--crit); }
+.chip-strong { background: var(--accent-soft); color: var(--accent); }
+.chip-watch { background: var(--warn-soft); color: var(--warn); }
+.chip-archive { background: var(--surface-2); color: var(--fg-muted); }
+.chip-good { background: var(--good-soft); color: var(--good); }
+.chip-warn { background: var(--warn-soft); color: var(--warn); }
+.tag { font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+.tag-fact { color: var(--good); }
+.tag-inference { color: var(--warn); }
+.tag-hypothesis { color: var(--fg-muted); }
+
+/* Buttons */
+.btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--control);
+  min-width: 44px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.btn::before { content: ""; position: absolute; top: -3px; bottom: -3px; left: 0; right: 0; }
+.btn:where(:hover) { border-color: var(--line); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn-ghost { background: transparent; border-color: var(--line); color: var(--fg); }
+.btn-text { background: transparent; border-color: transparent; color: var(--fg-muted); padding: 0 8px; font-weight: 500; }
+.btn-text:where(:hover) { color: var(--fg); }
+.btn-ghost[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--fg); }
+.btn:disabled, .btn[aria-disabled="true"] { background: var(--surface-2); border-color: transparent; color: var(--fg-muted); cursor: default; }
+
+/* Pills: interactive toggles */
+.pill-row { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--control);
+  min-width: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pill::before { content: ""; position: absolute; top: -3px; bottom: -3px; left: 0; right: 0; }
+.pill:where(:hover) { border-color: var(--fg-muted); }
+.pill[aria-pressed="true"], .pill[aria-checked="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+/* Segmented control */
+.seg { display: inline-flex; gap: 2px; padding: 1px; background: var(--surface-2); border-radius: var(--radius-pill); }
+.seg-btn {
+  position: relative;
+  min-height: 38px;
+  min-width: 44px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.seg-btn::before { content: ""; position: absolute; top: -4px; bottom: -4px; left: 0; right: 0; }
+.seg-btn:where(:hover) { color: var(--fg); }
+.seg-btn[aria-pressed="true"] { background: var(--surface); border-color: var(--line); color: var(--fg); }
+
+/* Switch */
+.switch {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  vertical-align: middle;
+  cursor: pointer;
+}
+.switch::before { content: ""; position: absolute; top: -10px; bottom: -10px; left: -1px; right: -1px; }
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+}
+.switch[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+.switch[aria-checked="true"]::after { transform: translateX(18px); background: var(--on-accent); }
+.switch:disabled { opacity: .45; cursor: not-allowed; }
+
+/* Fields */
+.field {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  font: 16px/1.5 var(--font-ui);
+}
+.field::placeholder { color: var(--fg-muted); }
+.field:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+.field-area { resize: vertical; }
+.input-row { display: flex; align-items: stretch; gap: 8px; min-width: 0; }
+
+/* Tables */
+.table { width: 100%; border-collapse: collapse; }
+.table-fixed { table-layout: fixed; }
+.th { padding: 8px 4px; text-align: left; vertical-align: bottom; font-size: 12px; font-weight: 600; color: var(--fg-muted); }
+.th-row { padding: 12px 4px; text-align: left; font-weight: 600; border-top: 1px solid var(--line); }
+.td { padding: 12px 4px; vertical-align: middle; border-top: 1px solid var(--line); }
+
+/* Toast */
+.toast-region {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 12px);
+  z-index: 30;
+  display: flex;
+  justify-content: center;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  pointer-events: none;
+}
+.toast {
+  max-width: 100%;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 14px;
+  font-weight: 600;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .15s ease, transform .15s ease;
+}
+.toast-on { opacity: 1; transform: none; }
+
+@media (min-width: 640px) {
+  .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1024px) {
+  .app {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    column-gap: 24px;
+    padding-block: 0 48px;
+  }
+  .nav {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100vh;
+    flex-direction: column;
+    gap: 4px;
+    background: transparent;
+    border-top: 0;
+    border-right: 1px solid var(--line);
+    padding-left: 0;
+    padding-right: 12px;
+    padding-bottom: 24px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    min-height: var(--header-h);
+    margin-bottom: 16px;
+    padding: 0 12px;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 500;
+  }
+  .nav-btn {
+    flex: none;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    min-height: 44px;
+    padding: 0 12px;
+    font-size: 14px;
+  }
+  .nav-btn:where(:hover) { background: var(--surface-2); }
+  .nav-btn::before { top: 10px; bottom: 10px; left: 0; right: auto; width: 2px; height: auto; }
+  .header { clip-path: inset(-100vmax -100vmax 0 -24px); }
+  .page-title { font-size: 26px; }
+  .header-layout { order: 2; flex: none; padding-bottom: 0; }
+  .header-meta { order: 3; flex-direction: row; align-items: center; gap: 12px; }
+  .split { display: grid; grid-template-columns: 360px minmax(0, 720px); gap: 24px; align-items: start; }
+  .toast-region { bottom: 24px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+</style>
+
+<div class="app">
+  <nav class="nav" aria-label="Main">
+    <p class="brand">SocialSelling</p>
+    <button type="button" class="nav-btn" data-action="tab" data-arg="today">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13h4l1.5 3h5l1.5-3h4"/><path d="M4 13l2-8h12l2 8v6H4z"/></svg>
+      <span>Today</span>
+    </button>
+    <button type="button" class="nav-btn" data-action="tab" data-arg="pipeline">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h11"/><path d="M4 18h6"/></svg>
+      <span>Pipeline</span>
+    </button>
+    <button type="button" class="nav-btn" data-action="tab" data-arg="intel">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.75"/></svg>
+      <span>Intel</span>
+    </button>
+    <button type="button" class="nav-btn" data-action="tab" data-arg="setup">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h9"/><path d="M17 7h3"/><circle cx="15" cy="7" r="2"/><path d="M4 17h3"/><path d="M11 17h9"/><circle cx="9" cy="17" r="2"/></svg>
+      <span>Setup</span>
+    </button>
+  </nav>
+
+  <div class="main">
+    <header class="header" id="header"></header>
+    <main class="view" id="view"></main>
+  </div>
+
+  <div class="toast-region" role="status" aria-live="polite">
+    <div class="toast" id="toast" hidden></div>
+  </div>
+</div>
+
+<script>
+const DATA = {
+  run: { label: 'Sun 2 Nov · run 07:00' },
+  funnel: { fetched: 73, bySource: 'hn 57, bluesky 9, appstore 6, rss 1', signals: 9, actions: 7, cost: '$0.02' },
+
+  products: {
+    mio: {
+      name: 'Mio',
+      oneLiner: 'Club app for Danish sports clubs: shifts, events and messages in one place.',
+      phrases: 14, competitors: 2, queries: 6,
+    },
+    'sales-habit': {
+      name: 'Sales Habit',
+      oneLiner: 'A 20-minute daily sales routine for freelancers and solo consultants.',
+      phrases: 11, competitors: 0, queries: 0,
+    },
+  },
+
+  replies: [
+    {
+      id: 'r1', product: 'sales-habit', source: 'Bluesky', channel: 'simple CRM for freelancers', ageH: 3,
+      author: '@lenadesigns.bsky.social',
+      url: 'https://bsky.app/profile/lenadesigns.bsky.social/post/3l5example1',
+      title: 'Looking for a simple CRM as a freelancer, HubSpot is overkill',
+      text: "I'm a solo web designer. I keep forgetting to follow up with leads and they go cold. HubSpot is way too complicated for one person. Is there a simple tool that just tells me who to chase today? Not looking for enterprise stuff.",
+      lang: 'en', tier: 'asking_for_tool', confidence: 0.91, flags: [], expiresH: 9,
+      drafts: {
+        default: "The thing that fixed this for me wasn't a CRM, it was a daily list. Every morning: who owes me a reply, who I owe one, who went quiet. 20 minutes, then back to client work. I built a small app around that routine (Sales Habit) because spreadsheets kept dying on me, but honestly the habit matters more than the tool. Happy to share how I set up the list if useful.",
+        nolink: "The thing that fixed this for me wasn't a CRM, it was a daily list. Every morning: who owes me a reply, who I owe one, who went quiet. 20 minutes, then back to client work. I ended up building my own little tool around that routine because spreadsheets kept dying on me, but honestly the habit matters more than the tool. Happy to share how I set up the list if useful.",
+        redraft: "Skip the CRM. Keep one list: who owes you a reply, who you owe, who went quiet. Work it 20 minutes every morning before client work. I built Sales Habit around exactly that routine because I kept dropping the ball otherwise. Ask me anything about the setup.",
+      },
+    },
+    {
+      id: 'r2', product: 'sales-habit', source: 'Hacker News', channel: 'Ask HN', ageH: 7,
+      author: 'throwaway_consult',
+      url: 'https://news.ycombinator.com/item?id=45900001',
+      title: 'Ask HN: How do you keep selling while delivering client work?',
+      text: "Every time I land a big project my pipeline is empty three months later. I only do sales when I'm desperate. Solo consultant, 8 years in. How do you stay consistent with business development when you're busy?",
+      lang: 'en', tier: 'describing_problem', confidence: 0.84, flags: [], expiresH: 5,
+      drafts: {
+        default: "Feast or famine is a scheduling problem more than a sales problem. The fix that stuck for me: a fixed 20-minute slot every day, before client work, where the only job is follow-ups and one new conversation. Not more selling, just never zero. Streaks help more than I expected. I ended up building a small tool for the routine, but a recurring calendar block and a list of names gets you 80% there.",
+        nolink: "Feast or famine is a scheduling problem more than a sales problem. The fix that stuck for me: a fixed 20-minute slot every day, before client work, where the only job is follow-ups and one new conversation. Not more selling, just never zero. Streaks help more than I expected. I ended up building a small tool for the routine, but a recurring calendar block and a list of names gets you 80% there.",
+        redraft: "Make selling a daily 20-minute habit instead of a quarterly panic. Fixed slot, before client work, follow-ups first. The pipeline stops going to zero within a month. I built Sales Habit around that routine after my third famine.",
+      },
+    },
+    {
+      id: 'r3', product: 'mio', source: 'Bluesky', channel: 'vagtplan', ageH: 11,
+      author: '@hbk-ungdom.bsky.social',
+      url: 'https://bsky.app/profile/hbk-ungdom.bsky.social/post/3l5example3',
+      title: 'Nogen der kender et godt system til vagter i vores klub?',
+      text: 'Vi er en lille håndboldklub og vagtplanen for cafeteriet kører i et Excel-ark som ingen opdaterer. Er der en app til det? Vi har kigget på Holdsport men det virker tungt.',
+      lang: 'da', tier: 'asking_for_tool', confidence: 0.88, flags: ['Danish', 'Mentions Holdsport'], expiresH: 1,
+      drafts: {
+        default: 'Excel-arket kender jeg alt for godt. Det der virkede for os: en vagtplan hvor folk selv tager vagter fra telefonen, og en påmindelse dagen før. Så forsvinder de fleste huller af sig selv. Vi har bygget det ind i Mio (hejmio.dk), som er lavet til klubber som jeres, men skriv endelig hvis I vil høre hvordan vi har sat det op uanset hvad I vælger.',
+        nolink: 'Excel-arket kender jeg alt for godt. Det der virkede for os: en vagtplan hvor folk selv tager vagter fra telefonen, og en påmindelse dagen før. Så forsvinder de fleste huller af sig selv. Vi har selv bygget en lille løsning til det, men skriv endelig hvis I vil høre hvordan vi har sat det op uanset hvad I vælger.',
+        redraft: 'Drop Excel. Lad folk tage vagter selv fra telefonen og send en påmindelse dagen før, så lukker hullerne sig stort set selv. Det er sådan vi har gjort det i Mio, men princippet virker i de fleste apps.',
+      },
+    },
+  ],
+
+  leads: [
+    {
+      id: 'l1', product: 'mio', name: 'Eksempel Klub Idrætsforening', domain: 'eksempel-klub.dk',
+      kommune: 'Aarhus Kommune', sports: ['fodbold', 'håndbold', 'gymnastik'], members: 420,
+      membersSource: { label: 'Annual report 2025', url: 'https://eksempel-klub.dk/aarsberetning-2025' },
+      score: 78, cls: 'HOT', status: 'new', foundH: 4,
+      topSignal: '4 Oct board minutes: getting quotes for a new membership system',
+      breakdown: [
+        { label: 'Intent', value: 35, max: 35, why: 'Board minutes 2026-10-04: obtaining quotes for a replacement membership system' },
+        { label: 'Pain', value: 20, max: 25, why: 'Volunteer coordination 10, communication fragmentation 10' },
+        { label: 'Fit', value: 15, max: 20, why: '300+ members, multiple sections, youth teams' },
+        { label: 'Timing', value: 10, max: 10, why: 'Evidence is 29 days old' },
+        { label: 'Reachability', value: 5, max: 10, why: 'Official club contact only' },
+      ],
+      adjustment: { value: -7, reason: 'Renewed Conventus contract for 2026 per AGM minutes' },
+      signals: [
+        { family: 'digital change', cls: 'FACT', summary: 'Board minutes: getting quotes for a replacement membership system', src: 'eksempel-klub.dk/referater/bestyrelsesmoede-2026-10-04', date: '2026-10-04' },
+        { family: 'volunteers', cls: 'FACT', summary: 'Kiosk shift plan lives in a shared Google Sheet, last updated in August', src: 'eksempel-klub.dk/frivillig', date: '2026-09-18' },
+        { family: 'Facebook dependency', cls: 'FACT', summary: 'Parents get updates in three separate Facebook groups (U9, U11, gymnastik)', src: 'facebook.com/groups/eksempelklub', date: '2026-10-21' },
+        { family: 'org change', cls: 'FACT', summary: 'AGM minutes: Conventus contract renewed for 2026', src: 'eksempel-klub.dk/referater/generalforsamling-2026', date: '2026-03-12' },
+        { family: 'fragmented stack', cls: 'INFERENCE', summary: 'Conventus, Messenger, WordPress and Sheets used side by side, no shared calendar', src: 'eksempel-klub.dk', date: '2026-10-04' },
+        { family: 'admin pain', cls: 'INFERENCE', summary: 'Two newsletters in a row ask for help covering kiosk and match-day shifts', src: 'eksempel-klub.dk/nyhedsbrev', date: '2026-10-15' },
+        { family: 'volunteers', cls: 'HYPOTHESIS', summary: 'Youth growth may outpace available coaches next season', src: 'eksempel-klub.dk/aarsberetning-2025', date: '2026-02-28' },
+      ],
+      stack: ['Conventus', 'Facebook groups', 'Messenger', 'WordPress site', 'Google Sheets (vagtplan)'],
+      contacts: [
+        { role: 'Formand', name: 'Anne Jensen', email: 'kontakt@eksempel-klub.dk', source: 'eksempel-klub.dk/kontakt' },
+      ],
+      brief: [
+        'Call Anne Jensen (formand), kontakt@eksempel-klub.dk, Tue–Thu evenings per website.',
+        'They wrote on 4 Oct that the board is getting quotes for a new membership system.',
+        'Pain: kiosk shifts live in a Google Sheet nobody updates; parents get info in three Facebook groups.',
+        'Open with: I read your October minutes about replacing the member system. Which part hurts most, shifts or communication?',
+        "Don't: pitch the website builder. They renewed Conventus for 2026, so lead with communication and shifts, not membership admin.",
+      ],
+      briefNote: null,
+    },
+    {
+      id: 'l2', product: 'mio', name: 'Rask Mølle og Omegns Idrætsforening (ROI)', domain: 'rask-molle.dk',
+      kommune: 'Hedensted Kommune', sports: ['fodbold', 'håndbold', 'gymnastik', 'badminton'], members: 700,
+      membersSource: { label: "2025 chairman's report", url: 'https://rask-molle.dk/formandens-beretning-2025' },
+      score: 71, cls: 'STRONG', status: 'new', foundH: 4,
+      topSignal: 'Chair stepping down after 16 years',
+      breakdown: [
+        { label: 'Intent', value: 15, max: 35, why: 'Chair stepping down and board restructuring planned' },
+        { label: 'Pain', value: 20, max: 25, why: 'Cross-department coordination and volunteer shortage' },
+        { label: 'Fit', value: 20, max: 20, why: '700 members, four sports, paid admin staff' },
+        { label: 'Timing', value: 6, max: 10, why: 'Newest evidence is about two months old' },
+        { label: 'Reachability', value: 10, max: 10, why: 'Named admin contact and office email' },
+      ],
+      adjustment: null,
+      signals: [
+        { family: 'org change', cls: 'FACT', summary: 'Chair stepping down after 16 years', src: 'rask-molle.dk/nyheder/formand-stopper', date: '2026-09-03' },
+        { family: 'org change', cls: 'FACT', summary: 'Board restructuring planned for the next AGM', src: 'rask-molle.dk/nyheder/formand-stopper', date: '2026-09-03' },
+        { family: 'org change', cls: 'FACT', summary: 'First paid administrative hire in 2024', src: 'rask-molle.dk/nyheder/ny-administrativ-medarbejder', date: '2024-08-15' },
+        { family: 'digital change', cls: 'HYPOTHESIS', summary: 'New accounting system in 2025; may be open to other tool changes', src: 'rask-molle.dk/formandens-beretning-2025', date: '2026-03-10' },
+        { family: 'admin pain', cls: 'INFERENCE', summary: "Chairman's report: coordinating across departments is getting harder", src: 'rask-molle.dk/formandens-beretning-2025', date: '2026-03-10' },
+        { family: 'volunteers', cls: 'FACT', summary: 'Several committee leads leaving at the same time', src: 'rask-molle.dk/formandens-beretning-2025', date: '2026-03-10' },
+        { family: 'volunteers', cls: 'FACT', summary: 'Volunteer shortage named in the 2024 annual report', src: 'rask-molle.dk/aarsberetning-2024', date: '2025-03-14' },
+        { family: 'fragmented stack', cls: 'INFERENCE', summary: 'Youth council appears to coordinate on Snapchat', src: 'instagram.com/raskmolleif', date: '2026-05-02' },
+        { family: 'Facebook dependency', cls: 'FACT', summary: 'Separate Facebook page for volunteers (frivilligklub)', src: 'facebook.com/roifrivilligklub', date: '2026-08-19' },
+        { family: 'digital change', cls: 'FACT', summary: 'Instagram account launched in 2024', src: 'instagram.com/raskmolleif', date: '2024-04-11' },
+        { family: 'fragmented stack', cls: 'FACT', summary: 'Conventus used for membership and payments', src: 'rask-molle.dk/bliv-medlem', date: '2026-09-03' },
+        { family: 'org change', cls: 'FACT', summary: 'Membership grew to 700 in 2025', src: 'rask-molle.dk/formandens-beretning-2025', date: '2026-03-10' },
+      ],
+      stack: ['Own website', 'Conventus', 'Facebook (club page)', 'Facebook (frivilligklub)', 'Instagram', 'Snapchat', 'New accounting system'],
+      contacts: [
+        { role: 'Formand', name: 'B. Nielsen', email: 'formand@rask-molle.dk', source: 'rask-molle.dk/bestyrelse' },
+        { role: 'Kasserer', name: 'K. Pedersen', email: 'kasserer@rask-molle.dk', source: 'rask-molle.dk/bestyrelse' },
+        { role: 'Administrativ medarbejder', name: 'L. Andersen', email: 'kontor@rask-molle.dk', source: 'rask-molle.dk/kontakt' },
+      ],
+      brief: [
+        'Call L. Andersen (administrativ medarbejder), kontor@rask-molle.dk, weekdays 9–14 per website.',
+        "Their 2025 chairman's report says coordinating across departments is getting harder.",
+        'Pain: volunteers sit on a separate Facebook page, the youth council on Snapchat, members in Conventus.',
+        'Open with: I read that your chair is stepping down after 16 years. Are you looking at how volunteers are coordinated before the handover?',
+        "Don't: pitch replacing Conventus or the new accounting system. Lead with volunteer coordination across departments.",
+      ],
+      briefNote: null,
+    },
+    {
+      id: 'l3', product: 'mio', name: 'Mou Idrætsforening (MIF)', domain: 'mou-if.dk',
+      kommune: 'Aalborg Kommune', sports: ['fodbold', 'gymnastik'], members: null, membersSource: null,
+      score: 37, cls: 'WATCH', status: 'new', foundH: 30,
+      topSignal: 'Household memberships handled by hand',
+      breakdown: [
+        { label: 'Intent', value: 0, max: 35, why: 'No sign they are looking for a new system' },
+        { label: 'Pain', value: 16, max: 25, why: 'Household-membership admin is done by hand' },
+        { label: 'Fit', value: 5, max: 20, why: 'Two sports, size unknown' },
+        { label: 'Timing', value: 6, max: 10, why: 'Newest evidence is about six weeks old' },
+        { label: 'Reachability', value: 10, max: 10, why: 'Official contact on their Facebook page' },
+      ],
+      adjustment: null,
+      signals: [
+        { family: 'admin pain', cls: 'FACT', summary: 'Facebook post asks families for patience while household memberships are invoiced by hand', src: 'facebook.com/mouidraetsforening', date: '2026-09-22' },
+        { family: 'admin pain', cls: 'FACT', summary: 'Treasurer asks families to report sibling discounts by email', src: 'facebook.com/mouidraetsforening', date: '2026-08-30' },
+        { family: 'volunteers', cls: 'INFERENCE', summary: 'Few volunteers named outside the board', src: 'facebook.com/mouidraetsforening', date: '2026-06-10' },
+        { family: 'digital change', cls: 'HYPOTHESIS', summary: 'May look for family accounts when the treasurer role changes', src: 'facebook.com/mouidraetsforening', date: '2026-09-22' },
+      ],
+      stack: ['Facebook page'],
+      contacts: [
+        { role: 'Formand', name: 'M. Larsen', email: 'kontakt@mou-if.dk', source: 'facebook.com/mouidraetsforening' },
+      ],
+      brief: null,
+      briefNote: 'Not worth a call yet. Watch for new signals.',
+    },
+  ],
+
+  competitors: [
+    { id: 'spond', name: 'Spond', stores: ['dk', 'no'] },
+    { id: 'holdsport', name: 'Holdsport', stores: ['dk'] },
+  ],
+
+  reviews: [
+    { id: 'i1', comp: 'spond', product: 'mio', store: 'no', lang: 'nb', stars: 3, ageD: 3, title: 'Andreas', text: 'Bra, men veldig vanskelig å finne innlegg/meldinger uten global søkefunksjon. Veldig rart det ikke finnes!', insight: 'Spond lacks global search for posts and messages', kind: 'gap', tier: 'passing_mention' },
+    { id: 'i2', comp: 'spond', product: 'mio', store: 'dk', lang: 'da', stars: 5, ageD: 9, title: 'Nem at bruge', text: 'Nem at bruge, forældrene svarer faktisk på events nu', insight: 'Parents actually RSVP: event reminders work', kind: 'praise' },
+    { id: 'i3', comp: 'spond', product: 'mio', store: 'no', lang: 'nb', stars: 2, ageD: 14, title: 'Kalender', text: 'Kalenderen synker ikke med telefonen', insight: 'Calendar sync to phone unreliable', kind: 'gap' },
+    { id: 'i4', comp: 'holdsport', product: 'mio', store: 'dk', lang: 'da', stars: 4, ageD: 28, title: 'Fin app', text: 'Fine funktioner. Jeg mangler dog at push notifikationerne virker.', insight: 'Push notifications not working', kind: 'gap' },
+    { id: 'i5', comp: 'holdsport', product: 'mio', store: 'dk', lang: 'da', stars: 1, ageD: 12, title: 'Appen crasher', text: 'Efter seneste opdatering kan jeg ikke se eller uploade videoer', insight: null, kind: 'generic' },
+    { id: 'i6', comp: 'holdsport', product: 'mio', store: 'dk', lang: 'da', stars: 4, ageD: 15, title: 'God app til Fodbold!', text: 'Vi bruger den til vores Old Boys hold hver uge, og den har ikke svigtet en eneste gang.', insight: 'Reliable week after week for an Old Boys team', kind: 'praise' },
+  ],
+
+  today: { leads: ['l1', 'l2'], intel: ['i1', 'i4'] },
+
+  ideas: [
+    { id: 'idea1', text: 'Comparison page: find any post or message again, Mio vs Spond', from: 'Spond has no global search' },
+    { id: 'idea2', text: 'Help article + short video: how shift reminders work in Mio (Holdsport users ask for working push)', from: 'Holdsport push notifications not working' },
+  ],
+
+  sources: [
+    { id: 'hn', name: 'Hacker News', status: 'on', last: '07:00 · 57 items', note: '' },
+    { id: 'bluesky', name: 'Bluesky', status: 'on', last: '07:00 · 9 posts', note: '' },
+    { id: 'appstore', name: 'App Store reviews', status: 'on', last: '07:00 · 6 reviews', note: 'Holdsport dk · Spond dk, no' },
+    { id: 'news', name: 'News & feeds', status: 'on', last: '07:00 · 1 article', note: '6 Bing queries · 0 alert feeds' },
+    { id: 'reddit', name: 'Reddit', status: 'unavailable', last: null, note: 'Access request denied, API closes March 2027' },
+    { id: 'gplay', name: 'Google Play', status: 'unavailable', last: null, note: 'No official feed' },
+  ],
+
+  plays: {
+    mio: { reply: true, lead: true, intel: true },
+    'sales-habit': { reply: true, lead: false, intel: false },
+  },
+  playLocks: { 'sales-habit:lead': "Off for people. We don't research individuals." },
+
+  schedule: 'Daily 07:00 Europe/Copenhagen via launchd',
+  runs: [
+    { date: '2026-11-02', fetched: 73, signals: 9, cost: '$0.02' },
+    { date: '2026-11-01', fetched: 64, signals: 7, cost: '$0.00' },
+    { date: '2026-10-29', fetched: 44, signals: 0, cost: '$0.00' },
+  ],
+};
+
+/* ---------- Lookups and constants ---------- */
+const index = arr => Object.fromEntries(arr.map(x => [x.id, x]));
+const REPLY = index(DATA.replies);
+const LEAD = index(DATA.leads);
+const REVIEW = index(DATA.reviews);
+const COMP = index(DATA.competitors);
+const SOURCE = index(DATA.sources);
+
+const TABS = ['today', 'pipeline', 'intel', 'setup'];
+const TITLES = { today: 'Today', pipeline: 'Pipeline', intel: 'Competitor intel', setup: 'Setup' };
+const VARIANTS = { A: 'Grouped by play', B: 'One feed', C: 'By product' };
+const TIERS = { asking_for_tool: 'Asking for a tool', describing_problem: 'Describing a problem' };
+const STATUSES = [['new', 'New'], ['contacted', 'Contacted'], ['replied', 'Replied'], ['meeting', 'Meeting'], ['no-interest', 'No interest']];
+const STATUS_LABEL = Object.fromEntries(STATUSES);
+const CLASS_CHIP = { HOT: 'chip-hot', STRONG: 'chip-strong', WATCH: 'chip-watch', ARCHIVE: 'chip-archive' };
+const TAG_CLASS = { FACT: 'tag-fact', INFERENCE: 'tag-inference', HYPOTHESIS: 'tag-hypothesis' };
+const PLAYS = { reply: 'Reply drafts', lead: 'Lead research', intel: 'Competitor intel' };
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const STORE_KEY = 'socialselling-prototype';
+const ICON_CLOCK = '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>';
+
+/* ---------- State ---------- */
+const state = {
+  tab: null,
+  variant: 'A',
+  feedFilter: 'all',
+  product: 'mio',
+  sel: { today: null, pipeline: null },
+  detailOpen: false,
+  leadFilter: 'all',
+  statusFilter: 'all',
+  intelFocus: null,
+  reply: {},
+  lead: {},
+  ideas: {},
+  sources: {},
+  plays: JSON.parse(JSON.stringify(DATA.plays)),
+};
+DATA.replies.forEach(r => {
+  state.reply[r.id] = { variant: 'default', text: r.drafts.default, rating: null, posted: false, undoTimer: null, direction: '' };
+});
+DATA.leads.forEach(l => { state.lead[l.id] = { status: l.status, note: '', showAll: false }; });
+DATA.sources.forEach(s => { state.sources[s.id] = s.status; });
+
+try {
+  const saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
+  if (VARIANTS[saved.variant]) state.variant = saved.variant;
+  if (['all', 'reply', 'lead', 'intel'].includes(saved.feedFilter)) state.feedFilter = saved.feedFilter;
+  if (DATA.products[saved.product]) state.product = saved.product;
+} catch (e) { /* storage unavailable */ }
+
+function persist() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({ variant: state.variant, feedFilter: state.feedFilter, product: state.product }));
+  } catch (e) { /* storage unavailable */ }
+}
+
+/* ---------- Helpers ---------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const langAttr = lang => (lang && lang !== 'en' ? ` lang="${lang}"` : '');
+const prodName = id => DATA.products[id].name;
+const countLabel = text => `${text.length} characters`;
+const mq = window.matchMedia('(min-width: 1024px)');
+const isDesk = () => mq.matches;
+
+function fmtDate(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${d} ${MONTHS[m - 1]} ${y}`;
+}
+function stars(n) {
+  return `<span class="stars" role="img" aria-label="${n} of 5 stars"><span class="star-on">${'★'.repeat(n)}</span><span class="star-off">${'☆'.repeat(5 - n)}</span></span>`;
+}
+function extLink(href, text, title) {
+  return `<a class="link" href="${esc(href)}" target="_blank" rel="noopener noreferrer"${title ? ` title="${esc(title)}"` : ''}>${esc(text)}<span aria-hidden="true">&nbsp;↗</span><span class="sr-only"> (opens in a new tab)</span></a>`;
+}
+function pill(action, value, label, on) {
+  return `<button type="button" class="pill" aria-pressed="${on}" data-action="${action}" data-arg="${esc(value)}">${esc(label)}</button>`;
+}
+function statusChip(status) {
+  const cls = status === 'meeting' ? ' chip-good' : (status === 'contacted' || status === 'replied') ? ' chip-accent' : '';
+  return `<span class="chip${cls}">${STATUS_LABEL[status]}</span>`;
+}
+function leadMeta(l, short) {
+  const sports = short && l.sports.length > 2 ? `${l.sports.slice(0, 2).join(', ')} +${l.sports.length - 2}` : l.sports.join(', ');
+  return `${l.kommune} · ${sports} · ${l.members ? `${l.members} members` : 'members unknown'}`;
+}
+
+/* Focus keeping across re-renders: controls are identified by data-action + data-arg. */
+function keyOf(el) {
+  if (!el || !el.dataset || !el.dataset.action) return null;
+  return `[data-action="${el.dataset.action}"][data-arg="${(el.dataset.arg || '').replace(/"/g, '\\"')}"]`;
+}
+function restore(selector) {
+  if (!selector) return;
+  const el = document.querySelector(selector);
+  if (el) el.focus({ preventScroll: true });
+}
+function keep(fn) {
+  const key = keyOf(document.activeElement);
+  fn();
+  restore(key);
+}
+
+/* Toast */
+let toastTimer = null;
+let toastHideTimer = null;
+function toast(msg) {
+  const el = $('toast');
+  clearTimeout(toastTimer);
+  clearTimeout(toastHideTimer);
+  el.textContent = msg;
+  el.hidden = false;
+  requestAnimationFrame(() => el.classList.add('toast-on'));
+  toastTimer = setTimeout(() => {
+    el.classList.remove('toast-on');
+    toastHideTimer = setTimeout(() => { el.hidden = true; }, 160);
+  }, 2500);
+}
+
+/* Clipboard with select-the-text fallback */
+function selectEl(el) {
+  if (!el) return;
+  if (typeof el.select === 'function') { el.focus(); el.select(); return; }
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+async function copyText(text, el) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Copied');
+  } catch (e) {
+    selectEl(el);
+    toast('Text selected. Press ⌘C or Ctrl+C to copy');
+  }
+}
+
+/* ---------- Today data ---------- */
+function todayItems() {
+  return [
+    ...DATA.replies.map(r => ({ kind: 'reply', id: r.id, product: r.product, ageH: r.ageH })),
+    ...DATA.today.leads.map(id => ({ kind: 'lead', id, product: LEAD[id].product, ageH: LEAD[id].foundH })),
+    ...DATA.today.intel.map(id => ({ kind: 'intel', id, product: REVIEW[id].product, ageH: REVIEW[id].ageD * 24 })),
+  ];
+}
+
+/* ---------- Cards ---------- */
+function replyCard(r, o) {
+  const s = state.reply[r.id];
+  const sel = o.selected === r.id;
+  const expires = r.expiresH <= 6
+    ? `<span class="meta inline-icon${r.expiresH <= 2 ? ' text-warn' : ''}">${ICON_CLOCK}expires in ${r.expiresH}h</span>`
+    : '';
+  return `<article class="card card-click${sel ? ' is-selected' : ''}">
+  <div class="card-row meta">${o.feed ? '<span class="chip">Reply</span>' : ''}<span>${esc(r.source)} · ${r.ageH}h ago</span><span class="chip chip-accent">${esc(prodName(r.product))}</span>${s.posted ? '<span class="chip"><span aria-hidden="true">✓</span> Posted</span>' : ''}</div>
+  <h3 class="card-title"><button type="button" class="card-hit" data-action="open" data-arg="${r.id}"${sel ? ' aria-current="true"' : ''}><span class="clamp-2"${langAttr(r.lang)}>${esc(r.title)}</span></button></h3>
+  <p class="meta line-1"${langAttr(r.lang)}>${esc(r.text)}</p>
+  <div class="card-foot"><div class="card-row"><span class="chip">${TIERS[r.tier]}</span>${expires}</div><span class="btn btn-ghost" aria-hidden="true">Open draft</span></div>
+</article>`;
+}
+
+function leadCard(l, o) {
+  const s = state.lead[l.id];
+  const sel = o.selected === l.id;
+  const showStatus = o.showStatus || s.status !== 'new';
+  return `<article class="card card-click${sel ? ' is-selected' : ''}">
+  ${o.feed ? '<div class="card-row meta"><span class="chip">Lead</span><span>found today</span></div>' : ''}
+  <div class="lead-top">
+    <div class="stack-4">
+      <h3 class="card-title"><button type="button" class="card-hit" data-action="open" data-arg="${l.id}"${sel ? ' aria-current="true"' : ''}>${esc(l.name)}</button></h3>
+      <p class="meta">${esc(leadMeta(l, true))}</p>
+    </div>
+    <div class="score-box"><span class="score mono"><span class="sr-only">Score </span>${l.score}</span><span class="chip ${CLASS_CHIP[l.cls]}">${l.cls}</span></div>
+  </div>
+  <div class="card-line">${showStatus ? statusChip(s.status) : ''}<p class="meta line-1">${esc(l.topSignal)}</p></div>
+</article>`;
+}
+
+function intelCard(v, o) {
+  const c = COMP[v.comp];
+  return `<article class="card card-click">
+  ${o.feed ? '<div class="card-row meta"><span class="chip">Intel</span><span>App Store</span></div>' : ''}
+  <div class="card-row"><h3 class="card-title"><button type="button" class="card-hit" data-action="open-intel" data-arg="${v.id}">${esc(c.name)}<span class="sr-only">: ${esc(v.insight)}</span></button></h3>${stars(v.stars)}<span class="chip">${v.store}</span><span class="meta">${v.ageD}d ago</span></div>
+  <p class="line-1">${esc(v.insight)}</p>
+  <p class="meta">review</p>
+</article>`;
+}
+
+function cardFor(item, o) {
+  if (item.kind === 'reply') return replyCard(REPLY[item.id], o);
+  if (item.kind === 'lead') return leadCard(LEAD[item.id], o);
+  return intelCard(REVIEW[item.id], o);
+}
+
+/* ---------- Today list ---------- */
+function section(key, title, items, o, viewAll) {
+  if (!items.length) return '';
+  const btn = viewAll
+    ? `<button type="button" class="btn btn-text" data-action="tab" data-arg="${viewAll.tab}" aria-label="${viewAll.label}">View all <span aria-hidden="true">→</span></button>`
+    : '';
+  return `<section class="section" aria-labelledby="sec-${key}">
+  <div class="section-head"><h2 class="eyebrow" id="sec-${key}">${title}</h2>${btn}</div>
+  <div class="cards">${items.map(i => cardFor(i, o)).join('')}</div>
+</section>`;
+}
+
+function grouped(items, o) {
+  const replies = items.filter(i => i.kind === 'reply');
+  const leads = items.filter(i => i.kind === 'lead');
+  const intel = items.filter(i => i.kind === 'intel');
+  const newLeads = leads.filter(i => state.lead[i.id].status === 'new').length;
+  return section('replies', `Reply drafts (${replies.length})`, replies, o)
+    + section('leads', `Leads (${newLeads} new)`, leads, o, { tab: 'pipeline', label: 'View all leads in Pipeline' })
+    + section('intel', `Competitor intel (${intel.length})`, intel, o, { tab: 'intel', label: 'View all competitor intel' });
+}
+
+function todayList(selected) {
+  const items = todayItems();
+  const o = { selected };
+  if (state.variant === 'B') {
+    const filters = [['all', 'All'], ['reply', 'Replies'], ['lead', 'Leads'], ['intel', 'Intel']];
+    const list = items
+      .filter(i => state.feedFilter === 'all' || i.kind === state.feedFilter)
+      .sort((a, b) => a.ageH - b.ageH);
+    return `<div class="pill-row" role="group" aria-label="Filter feed">${filters.map(([v, l]) => pill('feed', v, l, state.feedFilter === v)).join('')}</div>
+<div class="cards">${list.map(i => cardFor(i, { ...o, feed: true })).join('')}</div>`;
+  }
+  if (state.variant === 'C') {
+    const seg = Object.keys(DATA.products).map(p => {
+      const n = items.filter(i => i.product === p).length;
+      return `<button type="button" class="seg-btn" aria-pressed="${state.product === p}" data-action="product" data-arg="${p}">${esc(prodName(p))} (${n})</button>`;
+    }).join('');
+    const body = grouped(items.filter(i => i.product === state.product), o);
+    return `<div><div class="seg" role="group" aria-label="Product">${seg}</div></div>
+${body || `<p class="meta">Nothing for ${esc(prodName(state.product))} today.</p>`}`;
+  }
+  return grouped(items, o);
+}
+
+/* ---------- Pipeline list ---------- */
+function filteredLeads() {
+  return DATA.leads
+    .filter(l => state.leadFilter === 'all' || l.cls === state.leadFilter)
+    .filter(l => state.statusFilter === 'all' || state.lead[l.id].status === state.statusFilter)
+    .sort((a, b) => b.score - a.score);
+}
+
+function pipelineList(selected) {
+  const leads = filteredLeads();
+  const classes = [['all', 'All'], ['HOT', 'HOT'], ['STRONG', 'STRONG'], ['WATCH', 'WATCH']];
+  const statuses = [['all', 'All statuses'], ...STATUSES];
+  return `<div class="stack-8">
+  <div class="pill-row" role="group" aria-label="Filter by class">${classes.map(([v, l]) => pill('lead-filter', v, l, state.leadFilter === v)).join('')}</div>
+  <div class="pill-row" role="group" aria-label="Filter by status">${statuses.map(([v, l]) => pill('status-filter', v, l, state.statusFilter === v)).join('')}</div>
+</div>
+${leads.length
+    ? `<section class="section" aria-labelledby="sec-leads"><h2 class="eyebrow" id="sec-leads">${leads.length} ${leads.length === 1 ? 'lead' : 'leads'} · by score</h2><div class="cards">${leads.map(l => leadCard(l, { selected, showStatus: true })).join('')}</div></section>`
+    : '<p class="meta">No leads match these filters.</p>'}`;
+}
+
+/* ---------- Reply detail ---------- */
+function postButtonInner(s) {
+  if (s.posted && !s.undoTimer) return '<span aria-hidden="true">✓</span> Posted';
+  return s.posted ? 'Undo' : 'Mark as posted';
+}
+
+function replyDetail(r) {
+  const s = state.reply[r.id];
+  const id = r.id;
+  const sameNoLink = r.drafts.nolink === r.drafts.default;
+  const final = s.posted && !s.undoTimer;
+  const rateBtn = (v, label) => `<button type="button" class="btn btn-ghost" id="rate-${id}-${v}" aria-pressed="${s.rating === v}" data-action="rate" data-arg="${id}:${v}">${label}</button>`;
+  return `<div class="detail">
+  <div class="stack-8">
+    <div class="card-row"><span class="chip chip-accent">${esc(prodName(r.product))}</span><span class="chip">${TIERS[r.tier]}</span><span class="chip" id="posted-chip-${id}"${s.posted ? '' : ' hidden'}><span aria-hidden="true">✓</span> Posted</span></div>
+    <h2 class="detail-title" id="detail-title" tabindex="-1"${langAttr(r.lang)}>${esc(r.title)}</h2>
+  </div>
+
+  <div class="inset">
+    <div class="card-row meta"><span>${esc(r.source)} · “${esc(r.channel)}” · ${r.ageH}h ago</span>${extLink(r.url, 'Open post')}</div>
+    <p class="meta mono wrap">${esc(r.author)}</p>
+    <blockquote class="quote"${langAttr(r.lang)}>${esc(r.text)}</blockquote>
+    <div class="card-row meta">${r.flags.map(f => `<span class="chip">${esc(f)}</span>`).join('')}<span class="mono">confidence ${r.confidence.toFixed(2)}</span><span class="inline-icon${r.expiresH <= 2 ? ' text-warn' : ''}">${ICON_CLOCK}expires in ${r.expiresH}h</span></div>
+  </div>
+
+  <section class="card">
+    <label class="eyebrow" for="draft-${id}">Draft</label>
+    <textarea class="field field-area" id="draft-${id}" rows="8" data-input="draft" data-arg="${id}"${langAttr(r.lang)}>${esc(s.text)}</textarea>
+    <div class="card-foot">
+      <div class="card-row">
+        <button type="button" class="pill" id="nolink-${id}" aria-pressed="${s.variant === 'nolink'}" data-action="nolink" data-arg="${id}">Without link</button>
+        <span class="meta" id="nolink-help-${id}"${s.variant === 'nolink' && sameNoLink ? '' : ' hidden'}>This draft has no link already</span>
+      </div>
+      <span class="meta mono" id="count-${id}">${countLabel(s.text)}</span>
+    </div>
+
+    <hr class="divider">
+    <label class="eyebrow" for="direction-${id}">Redraft</label>
+    <div class="input-row">
+      <input class="field grow" type="text" id="direction-${id}" placeholder="Optional direction, e.g. shorter, mention the free plan" value="${esc(s.direction)}" data-input="direction" data-arg="${id}">
+      <button type="button" class="btn" data-action="redraft" data-arg="${id}">Redraft</button>
+    </div>
+
+    <hr class="divider">
+    <div class="card-row">
+      <div class="card-row" role="group" aria-label="Rate this draft">${rateBtn('good', 'Good draft')}${rateBtn('work', 'Needs work')}</div>
+      <span class="meta">Ratings tune future drafts</span>
+    </div>
+  </section>
+
+  <div class="card-row">
+    <button type="button" class="btn btn-primary" data-action="copy-draft" data-arg="${id}">Copy draft</button>
+    <button type="button" class="btn" id="post-${id}" data-action="post" data-arg="${id}"${final ? ' aria-disabled="true"' : ''}>${postButtonInner(s)}</button>
+  </div>
+  <p class="meta">You post it yourself. Nothing is sent automatically.</p>
+</div>`;
+}
+
+function syncDraft(id) {
+  const r = REPLY[id];
+  const s = state.reply[id];
+  const ta = $(`draft-${id}`);
+  if (ta) ta.value = s.text;
+  const count = $(`count-${id}`);
+  if (count) count.textContent = countLabel(s.text);
+  const toggle = $(`nolink-${id}`);
+  if (toggle) toggle.setAttribute('aria-pressed', String(s.variant === 'nolink'));
+  const help = $(`nolink-help-${id}`);
+  if (help) help.hidden = !(s.variant === 'nolink' && r.drafts.nolink === r.drafts.default);
+}
+
+function syncPost(id) {
+  const s = state.reply[id];
+  const chip = $(`posted-chip-${id}`);
+  if (chip) chip.hidden = !s.posted;
+  const btn = $(`post-${id}`);
+  if (!btn) return;
+  btn.innerHTML = postButtonInner(s);
+  if (s.posted && !s.undoTimer) btn.setAttribute('aria-disabled', 'true');
+  else btn.removeAttribute('aria-disabled');
+}
+
+/* ---------- Lead detail ---------- */
+function signalRow(g) {
+  const domain = g.src.split('/')[0];
+  return `<li class="row">
+  <div class="card-row"><span class="chip">${esc(g.family)}</span><span class="tag ${TAG_CLASS[g.cls]}">${g.cls}</span></div>
+  <p>${esc(g.summary)}</p>
+  <p class="meta">${extLink(`https://${g.src}`, domain)} · <span class="mono">${fmtDate(g.date)}</span></p>
+</li>`;
+}
+
+function signalsHtml(l) {
+  const s = state.lead[l.id];
+  const list = s.showAll ? l.signals : l.signals.slice(0, 4);
+  const more = l.signals.length > 4
+    ? `<div><button type="button" class="btn btn-text" data-action="signals" data-arg="${l.id}" aria-expanded="${s.showAll}" aria-controls="sig-list-${l.id}">${s.showAll ? 'Show fewer' : `Show all ${l.signals.length}`}</button></div>`
+    : '';
+  return `<ul class="rows" id="sig-list-${l.id}">${list.map(signalRow).join('')}</ul>${more}`;
+}
+
+function leadDetail(l) {
+  const s = state.lead[l.id];
+  const id = l.id;
+  const members = l.members
+    ? extLink(l.membersSource.url, `${l.members} members`, `Source: ${l.membersSource.label}`)
+    : 'members unknown';
+  const bars = l.breakdown.map(b => `<div class="stack-4">
+      <div class="bar-row"><span>${b.label}</span><span class="bar"><span class="bar-fill" style="width:${Math.round(b.value / b.max * 100)}%"></span></span><span class="mono end">${b.value}/${b.max}</span></div>
+      <p class="meta">${esc(b.why)}</p>
+    </div>`).join('');
+  const adj = l.adjustment
+    ? `<hr class="divider"><p class="text-crit"><span class="mono">${l.adjustment.value < 0 ? '−' : '+'}${Math.abs(l.adjustment.value)}</span> ${esc(l.adjustment.reason)}</p>`
+    : '';
+  const brief = l.brief
+    ? `<div class="stack-4"><h3 class="eyebrow">Call brief</h3><p class="meta">Danish law bars cold email. Call or write a letter.</p></div>
+    <ul class="brief" id="brief-${id}">${l.brief.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+    <div><button type="button" class="btn btn-ghost" data-action="copy-brief" data-arg="${id}">Copy brief</button></div>`
+    : `<h3 class="eyebrow">Call brief</h3><p class="meta">${esc(l.briefNote)}</p>`;
+  const contacts = l.contacts.map((c, i) => `<li class="row">
+      <p class="meta">${esc(c.role)}</p>
+      <p class="strong">${esc(c.name)}</p>
+      <div class="card-line"><span class="mono wrap grow" id="email-${id}-${i}">${esc(c.email)}</span><button type="button" class="btn btn-ghost" data-action="copy-email" data-arg="${id}:${i}" aria-label="Copy email for ${esc(c.name)}">Copy</button></div>
+      <p class="meta">Source: ${extLink(`https://${c.source}`, c.source)}</p>
+    </li>`).join('');
+  const radios = STATUSES.map(([v, label]) => {
+    const on = s.status === v;
+    return `<button type="button" class="pill" role="radio" aria-checked="${on}" tabindex="${on ? 0 : -1}" data-action="status" data-arg="${id}:${v}">${label}</button>`;
+  }).join('');
+
+  return `<div class="detail">
+  <div class="stack-8">
+    <h2 class="detail-title display" id="detail-title" tabindex="-1">${esc(l.name)}</h2>
+    <p class="meta">${esc(l.kommune)} · ${esc(l.sports.join(', '))} · ${members}</p>
+    <div class="card-row"><span class="chip ${CLASS_CHIP[l.cls]}">${l.cls}</span><span class="score-big"><span class="sr-only">Score </span>${l.score}<span class="meta"> / 100</span></span></div>
+  </div>
+
+  <section class="card" aria-labelledby="h-score-${id}">
+    <h3 class="eyebrow" id="h-score-${id}">Score breakdown</h3>
+    ${bars}
+    ${adj}
+  </section>
+
+  <section class="card">${brief}</section>
+
+  <section class="card" aria-labelledby="h-sig-${id}">
+    <h3 class="eyebrow" id="h-sig-${id}">Signals (${l.signals.length})</h3>
+    <div class="stack-8" id="signals-${id}">${signalsHtml(l)}</div>
+  </section>
+
+  <section class="card" aria-labelledby="h-stack-${id}">
+    <h3 class="eyebrow" id="h-stack-${id}">Digital stack</h3>
+    <div class="card-row">${l.stack.map(x => `<span class="chip">${esc(x)}</span>`).join('')}</div>
+  </section>
+
+  <section class="card" aria-labelledby="h-contacts-${id}">
+    <div class="stack-4"><h3 class="eyebrow" id="h-contacts-${id}">Contacts</h3><p class="meta">Only contact details the club publishes itself.</p></div>
+    <ul class="rows">${contacts}</ul>
+  </section>
+
+  <section class="card">
+    <h3 class="eyebrow" id="status-label-${id}">Pipeline</h3>
+    <div class="pill-row" role="radiogroup" aria-labelledby="status-label-${id}">${radios}</div>
+    <hr class="divider">
+    <label class="eyebrow" for="fb-${id}">Feedback</label>
+    <textarea class="field field-area" id="fb-${id}" rows="3" placeholder="What happened? e.g. called, call back in January" data-input="note" data-arg="${id}">${esc(s.note)}</textarea>
+    <div><button type="button" class="btn btn-ghost" data-action="save-note" data-arg="${id}">Save note</button></div>
+  </section>
+</div>`;
+}
+
+function syncStatus(id) {
+  const current = `${id}:${state.lead[id].status}`;
+  document.querySelectorAll(`[data-action="status"][data-arg^="${id}:"]`).forEach(b => {
+    const on = b.dataset.arg === current;
+    b.setAttribute('aria-checked', String(on));
+    b.tabIndex = on ? 0 : -1;
+  });
+}
+
+/* ---------- Intel view ---------- */
+function intelView() {
+  const focus = state.intelFocus || {};
+  const comps = DATA.competitors.map(c => {
+    const rs = DATA.reviews.filter(v => v.comp === c.id);
+    const avg = rs.reduce((sum, v) => sum + v.stars, 0) / rs.length;
+    const dist = [5, 4, 3, 2, 1].map(n => {
+      const k = rs.filter(v => v.stars === n).length;
+      return `<div class="dist-row"><span class="mono meta">${n}★</span><span class="bar"><span class="bar-fill" style="width:${Math.round(k / rs.length * 100)}%"></span></span><span class="mono meta end">${k}</span></div>`;
+    }).join('');
+    const on = focus.comp === c.id;
+    return `<article class="card${on ? ' is-selected' : ''}" id="comp-${c.id}"${on ? ' tabindex="-1"' : ''} aria-labelledby="comp-name-${c.id}">
+      <div class="card-row"><h3 class="card-title" id="comp-name-${c.id}">${esc(c.name)}</h3>${c.stores.map(st => `<span class="chip">${st}</span>`).join('')}</div>
+      <p class="mono meta">${rs.length} reviews · avg ${avg.toFixed(1)}★</p>
+      <div class="dist">${dist}</div>
+    </article>`;
+  }).join('');
+
+  const row = v => `<li class="row${focus.review === v.id ? ' row-focus' : ''}" id="rev-${v.id}">
+      <p class="strong">${esc(v.insight)}</p>
+      <div class="card-row meta">${stars(v.stars)}<span class="chip">${v.store}</span><span>${v.ageD}d ago</span><span class="chip chip-accent">${esc(COMP[v.comp].name)}</span></div>
+      <p class="meta clamp-2" lang="${v.lang}">“${esc(v.text)}”</p>
+    </li>`;
+  const byAge = (a, b) => a.ageD - b.ageD;
+  const listSection = (key, title, items, empty) => `<section class="section" aria-labelledby="h-${key}">
+    <h2 class="eyebrow" id="h-${key}">${title}</h2>
+    <div class="card">${items.length ? `<ul class="rows">${items.map(row).join('')}</ul>` : `<p class="meta">${empty}</p>`}</div>
+  </section>`;
+
+  const ideas = DATA.ideas.map(i => {
+    const saved = !!state.ideas[i.id];
+    return `<li class="row"><div class="card-line">
+      <div class="grow stack-4"><p>${esc(i.text)}</p><p class="meta">From: ${esc(i.from)}</p></div>
+      <button type="button" class="btn btn-ghost" aria-pressed="${saved}" data-action="idea" data-arg="${i.id}">${saved ? 'Saved' : 'Save idea'}</button>
+    </div></li>`;
+  }).join('');
+
+  return `<div class="single">
+  <section class="section" aria-labelledby="h-week">
+    <h2 class="eyebrow" id="h-week">This week</h2>
+    <div class="grid-2">${comps}</div>
+  </section>
+  ${listSection('gaps', 'Gaps users mention', DATA.reviews.filter(v => v.kind === 'gap').sort(byAge), 'No gaps mentioned this week.')}
+  ${listSection('praise', 'What users praise', DATA.reviews.filter(v => v.kind === 'praise').sort(byAge), 'No praise this week.')}
+  ${listSection('switch', 'Switching intent', DATA.reviews.filter(v => v.kind === 'switch').sort(byAge), "No one said they're leaving this week.")}
+  <section class="section" aria-labelledby="h-ideas">
+    <h2 class="eyebrow" id="h-ideas">Content ideas from this</h2>
+    <div class="card"><ul class="rows">${ideas}</ul></div>
+  </section>
+</div>`;
+}
+
+/* ---------- Setup view ---------- */
+function setupView() {
+  const sources = DATA.sources.map(s => {
+    const st = state.sources[s.id];
+    const chip = st === 'on' ? '<span class="chip chip-good">On</span>'
+      : st === 'off' ? '<span class="chip">Off</span>'
+      : '<span class="chip chip-warn">Unavailable</span>';
+    const noteId = `src-note-${s.id}`;
+    return `<li class="row"><div class="card-line">
+      <div class="grow stack-4">
+        <div class="card-row"><span class="strong" id="src-name-${s.id}">${esc(s.name)}</span>${chip}</div>
+        ${s.last ? `<p class="mono meta">${esc(s.last)}</p>` : ''}
+        ${s.note ? `<p class="meta" id="${noteId}">${esc(s.note)}</p>` : ''}
+      </div>
+      <button type="button" class="switch" role="switch" aria-checked="${st === 'on'}" aria-labelledby="src-name-${s.id}"${s.note ? ` aria-describedby="${noteId}"` : ''}${st === 'unavailable' ? ' disabled' : ''} data-action="source" data-arg="${s.id}"></button>
+    </div></li>`;
+  }).join('');
+
+  const playKeys = Object.keys(PLAYS);
+  const playRows = Object.keys(DATA.products).map(p => `<tr>
+      <th class="th-row" scope="row">${esc(prodName(p))}</th>
+      ${playKeys.map(k => {
+        const lock = DATA.playLocks[`${p}:${k}`];
+        return `<td class="td"><button type="button" class="switch" role="switch" aria-checked="${state.plays[p][k]}" aria-label="${esc(prodName(p))}: ${PLAYS[k]}"${lock ? ' disabled aria-describedby="play-note"' : ''} data-action="play" data-arg="${p}:${k}"></button>${lock ? '<span class="meta" aria-hidden="true"> *</span>' : ''}</td>`;
+      }).join('')}
+    </tr>`).join('');
+  const lockNotes = Object.entries(DATA.playLocks).map(([key, note]) => {
+    const [p, k] = key.split(':');
+    return `* ${esc(prodName(p))} ${PLAYS[k].toLowerCase()}: ${esc(note)}`;
+  }).join(' ');
+
+  const products = Object.entries(DATA.products).map(([id, p]) => `<article class="card">
+      <h3 class="card-title">${esc(p.name)}</h3>
+      <p>${esc(p.oneLiner)}</p>
+      <p class="mono meta">${p.phrases} phrases · ${p.competitors} competitors · ${p.queries} queries</p>
+      <div><button type="button" class="btn btn-ghost" data-action="edit-product" data-arg="${id}">Edit in products.yaml</button></div>
+    </article>`).join('');
+
+  const runs = DATA.runs.map(r => `<tr><td class="td mono">${r.date}</td><td class="td mono end">${r.fetched}</td><td class="td mono end">${r.signals}</td><td class="td mono end">${r.cost}</td></tr>`).join('');
+
+  return `<div class="single">
+  <section class="section" aria-labelledby="h-sources">
+    <h2 class="eyebrow" id="h-sources">Sources</h2>
+    <div class="card"><ul class="rows">${sources}</ul></div>
+  </section>
+
+  <section class="section" aria-labelledby="h-plays">
+    <h2 class="eyebrow" id="h-plays">Plays per product</h2>
+    <div class="card">
+      <table class="table table-fixed">
+        <thead><tr><th class="th" scope="col"><span class="sr-only">Product</span></th>${playKeys.map(k => `<th class="th" scope="col">${PLAYS[k]}</th>`).join('')}</tr></thead>
+        <tbody>${playRows}</tbody>
+      </table>
+      <p class="meta" id="play-note">${lockNotes}</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="h-products">
+    <h2 class="eyebrow" id="h-products">Products</h2>
+    <div class="grid-2">${products}</div>
+  </section>
+
+  <section class="section" aria-labelledby="h-schedule">
+    <h2 class="eyebrow" id="h-schedule">Schedule</h2>
+    <div class="card">
+      <p>${esc(DATA.schedule)}</p>
+      <table class="table">
+        <caption class="sr-only">Last 3 runs</caption>
+        <thead><tr><th class="th" scope="col">Date</th><th class="th end" scope="col">Fetched</th><th class="th end" scope="col">Signals</th><th class="th end" scope="col">Cost</th></tr></thead>
+        <tbody>${runs}</tbody>
+      </table>
+    </div>
+  </section>
+</div>`;
+}
+
+/* ---------- Render ---------- */
+function defaultSel(tab) {
+  if (tab === 'today') return DATA.replies[0].id;
+  const first = filteredLeads()[0];
+  return first ? first.id : DATA.leads[0].id;
+}
+function currentSel() {
+  const t = state.tab;
+  if (t !== 'today' && t !== 'pipeline') return null;
+  if (isDesk()) return state.sel[t] || defaultSel(t);
+  return state.detailOpen ? state.sel[t] : null;
+}
+
+function funnelHtml(hidden) {
+  const f = DATA.funnel;
+  const item = (label, value, title) => `<span class="funnel-item"${title ? ` title="${esc(title)}"` : ''}><span class="meta">${label}</span> <span class="mono">${value}</span></span>`;
+  const dot = '<span class="meta" aria-hidden="true">·</span>';
+  return `<p class="funnel"${hidden ? ' hidden' : ''}>${item('fetched', f.fetched, f.bySource)}${dot}${item('signals', f.signals)}${dot}${item('actions', f.actions)}${dot}${item('cost', f.cost)}</p>`;
+}
+
+function renderNav() {
+  document.querySelectorAll('.nav-btn').forEach(b => {
+    if (b.dataset.arg === state.tab) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
+}
+
+function renderHeader() {
+  const t = state.tab;
+  const back = !isDesk() && state.detailOpen && !!currentSel();
+  const layout = t === 'today' && !back;
+  $('header').innerHTML = `<div class="header-title">${back ? '<button type="button" class="btn btn-text" data-action="back" data-arg=""><span aria-hidden="true">←</span> Back</button>' : ''}<h1 class="page-title">${TITLES[t]}</h1></div>
+${layout ? `<div class="header-layout"><span class="meta" id="layout-label">Layout</span><div class="seg" role="group" aria-labelledby="layout-label">${Object.keys(VARIANTS).map(k => `<button type="button" class="seg-btn" aria-pressed="${state.variant === k}" aria-label="${k}: ${VARIANTS[k]}" data-action="variant" data-arg="${k}">${k}</button>`).join('')}</div><span class="meta">${VARIANTS[state.variant]}</span></div>` : ''}
+<div class="header-meta"><span class="mono header-date">${DATA.run.label}</span><span class="chip">Example data</span></div>`;
+  document.title = `${TITLES[t]} · SocialSelling`;
+}
+
+function renderList() {
+  const el = $('list');
+  if (!el) return;
+  const sel = currentSel();
+  el.innerHTML = state.tab === 'today' ? todayList(sel) : pipelineList(sel);
+}
+
+function renderDetail() {
+  const el = $('detail');
+  if (!el) return;
+  const id = currentSel();
+  if (id && isDesk() && !state.sel[state.tab]) state.sel[state.tab] = id; // pin the default selection
+  el.innerHTML = id ? (id[0] === 'r' ? replyDetail(REPLY[id]) : leadDetail(LEAD[id])) : '';
+  el.hidden = !id;
+}
+
+function renderView() {
+  const t = state.tab;
+  const view = $('view');
+  if (t === 'today' || t === 'pipeline') {
+    const sel = currentSel();
+    const hideList = !isDesk() && !!sel;
+    view.innerHTML = `${t === 'today' ? funnelHtml(hideList) : ''}
+<div class="split">
+  <div class="col-list" id="list"${hideList ? ' hidden' : ''}></div>
+  <div class="col-detail" id="detail"${sel ? '' : ' hidden'}></div>
+</div>`;
+    renderList();
+    renderDetail();
+  } else {
+    view.innerHTML = t === 'intel' ? intelView() : setupView();
+  }
+}
+
+function render(focusSelector) {
+  const key = keyOf(document.activeElement);
+  renderNav();
+  renderHeader();
+  renderView();
+  restore(focusSelector || key);
+}
+
+/* ---------- Routing ---------- */
+function applyHash() {
+  const h = location.hash.replace('#', '');
+  const t = TABS.includes(h) ? h : 'today';
+  const changed = t !== state.tab;
+  state.tab = t;
+  if (changed) state.detailOpen = false;
+  render();
+  if (t === 'intel' && state.intelFocus) {
+    const card = $(`comp-${state.intelFocus.comp}`);
+    if (card) {
+      card.focus({ preventScroll: true });
+      card.scrollIntoView({ block: 'start' });
+    }
+  } else if (changed) {
+    window.scrollTo(0, 0);
+  }
+}
+function go(tab) {
+  if (location.hash === `#${tab}`) applyHash();
+  else location.hash = tab;
+}
+
+/* ---------- Actions ---------- */
+const ACTIONS = {
+  tab(t) {
+    state.intelFocus = null;
+    state.detailOpen = false;
+    go(t);
+  },
+  variant(k) {
+    state.variant = k;
+    persist();
+    render();
+  },
+  feed(f) {
+    state.feedFilter = f;
+    persist();
+    keep(renderList);
+  },
+  product(p) {
+    state.product = p;
+    persist();
+    keep(renderList);
+  },
+  'lead-filter'(v) {
+    state.leadFilter = v;
+    keep(renderList);
+  },
+  'status-filter'(v) {
+    state.statusFilter = v;
+    keep(renderList);
+  },
+  open(id) {
+    state.sel[state.tab] = id;
+    if (isDesk()) {
+      renderList();
+      renderDetail();
+      restore(`[data-action="open"][data-arg="${id}"]`);
+      const detail = $('detail');
+      if (detail && detail.getBoundingClientRect().top < 0) window.scrollTo(0, 0);
+    } else {
+      state.detailOpen = true;
+      render();
+      window.scrollTo(0, 0);
+      const title = $('detail-title');
+      if (title) title.focus({ preventScroll: true });
+    }
+  },
+  back() {
+    const id = state.sel[state.tab];
+    state.detailOpen = false;
+    const selector = `[data-action="open"][data-arg="${id}"]`;
+    render(selector);
+    const card = document.querySelector(selector);
+    if (card) card.scrollIntoView({ block: 'center' });
+  },
+  'open-intel'(id) {
+    const v = REVIEW[id];
+    state.intelFocus = { comp: v.comp, review: id };
+    state.detailOpen = false;
+    go('intel');
+  },
+  nolink(id) {
+    const s = state.reply[id];
+    s.variant = s.variant === 'nolink' ? 'default' : 'nolink';
+    s.text = REPLY[id].drafts[s.variant];
+    syncDraft(id);
+  },
+  redraft(id) {
+    const r = REPLY[id];
+    const s = state.reply[id];
+    const hasNoLink = r.drafts.nolink !== r.drafts.default;
+    const cycle = ['default', 'nolink', 'redraft'].filter(v => v !== 'nolink' || hasNoLink);
+    let i = cycle.indexOf(s.variant);
+    if (i < 0) i = 0;
+    s.variant = cycle[(i + 1) % cycle.length];
+    s.text = r.drafts[s.variant];
+    syncDraft(id);
+    toast('Redrafted');
+  },
+  rate(arg) {
+    const [id, v] = arg.split(':');
+    const s = state.reply[id];
+    s.rating = s.rating === v ? null : v;
+    ['good', 'work'].forEach(k => {
+      const b = $(`rate-${id}-${k}`);
+      if (b) b.setAttribute('aria-pressed', String(s.rating === k));
+    });
+  },
+  'copy-draft'(id) {
+    const ta = $(`draft-${id}`);
+    copyText(ta ? ta.value : state.reply[id].text, ta);
+  },
+  post(id) {
+    const s = state.reply[id];
+    if (!s.posted) {
+      s.posted = true;
+      s.undoTimer = setTimeout(() => { s.undoTimer = null; syncPost(id); }, 10000);
+      toast('Marked as posted');
+    } else if (s.undoTimer) {
+      clearTimeout(s.undoTimer);
+      s.undoTimer = null;
+      s.posted = false;
+      toast('Undone. Not marked as posted');
+    } else {
+      return;
+    }
+    syncPost(id);
+    renderList();
+  },
+  status(arg) {
+    const [id, st] = arg.split(':');
+    if (state.lead[id].status === st) return;
+    state.lead[id].status = st;
+    syncStatus(id);
+    renderList();
+    toast(`Saved: ${STATUS_LABEL[st]}`);
+  },
+  'save-note'() {
+    toast('Note saved');
+  },
+  signals(id) {
+    const s = state.lead[id];
+    s.showAll = !s.showAll;
+    keep(() => { $(`signals-${id}`).innerHTML = signalsHtml(LEAD[id]); });
+  },
+  'copy-brief'(id) {
+    copyText(LEAD[id].brief.join('\n'), $(`brief-${id}`));
+  },
+  'copy-email'(arg) {
+    const [id, i] = arg.split(':');
+    copyText(LEAD[id].contacts[Number(i)].email, $(`email-${id}-${i}`));
+  },
+  idea(id, btn) {
+    state.ideas[id] = !state.ideas[id];
+    btn.setAttribute('aria-pressed', String(state.ideas[id]));
+    btn.textContent = state.ideas[id] ? 'Saved' : 'Save idea';
+    toast(state.ideas[id] ? 'Idea saved' : 'Idea removed');
+  },
+  source(id) {
+    const on = state.sources[id] === 'on';
+    state.sources[id] = on ? 'off' : 'on';
+    render();
+    toast(`Saved: ${SOURCE[id].name} ${on ? 'off' : 'on'}`);
+  },
+  play(arg) {
+    const [p, k] = arg.split(':');
+    state.plays[p][k] = !state.plays[p][k];
+    render();
+    toast(`Saved: ${prodName(p)} ${PLAYS[k].toLowerCase()} ${state.plays[p][k] ? 'on' : 'off'}`);
+  },
+  'edit-product'() {
+    toast('Edit products.yaml in the repo');
+  },
+};
+
+/* ---------- Events ---------- */
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-action]');
+  if (!t || t.disabled || t.getAttribute('aria-disabled') === 'true') return;
+  const fn = ACTIONS[t.dataset.action];
+  if (fn) fn(t.dataset.arg || '', t);
+});
+
+document.addEventListener('input', e => {
+  const t = e.target;
+  const kind = t.dataset ? t.dataset.input : null;
+  if (!kind) return;
+  const id = t.dataset.arg;
+  if (kind === 'draft') {
+    state.reply[id].text = t.value;
+    const count = $(`count-${id}`);
+    if (count) count.textContent = countLabel(t.value);
+  } else if (kind === 'direction') {
+    state.reply[id].direction = t.value;
+  } else if (kind === 'note') {
+    state.lead[id].note = t.value;
+  }
+});
+
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  if (e.key === 'Escape' && !isDesk() && state.detailOpen) {
+    ACTIONS.back();
+    return;
+  }
+  if (e.key === 'Enter' && t.dataset && t.dataset.input === 'direction') {
+    e.preventDefault();
+    ACTIONS.redraft(t.dataset.arg);
+    return;
+  }
+  if (t.getAttribute && t.getAttribute('role') === 'radio') {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const group = Array.from(t.closest('[role="radiogroup"]').querySelectorAll('[role="radio"]'));
+    const next = group[(group.indexOf(t) + step + group.length) % group.length];
+    next.click();
+    next.focus();
+  }
+});
+
+window.addEventListener('hashchange', applyHash);
+if (mq.addEventListener) mq.addEventListener('change', () => render());
+else mq.addListener(() => render());
+
+applyHash();
+</script>
