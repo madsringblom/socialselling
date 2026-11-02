@@ -53,6 +53,17 @@ For every `competitors[].app_store` entry, the unauthenticated Apple customer-re
 
 Each `news_queries` entry is searched with Bing News RSS (`setlang=da&cc=dk`, so Danish results). Google News RSS is not used because it geo-redirects. The top-level `feeds` list takes any RSS 2.0 or Atom URL, for example a Google Alert with delivery set to "RSS feed". Caps: 20 queries and 20 feeds per run; only articles from the last 7 days are kept. Bing's click-tracking links are unwrapped to the publisher URL.
 
+#### Google Alerts as feeds
+
+Google Alerts index Danish forums, local news and public Facebook pages far better than Bing News, and each alert can be delivered as an RSS feed. Alerts must be created in your own Google account; the tool only reads the resulting feed URL.
+
+1. Open https://www.google.com/alerts while logged in.
+2. Type a query. Open "Show options" and set: How often → As-it-happens; Sources → Automatic; Language → Danish (or English); Region → Denmark; How many → All results; Deliver to → **RSS feed**.
+3. Create the alert, then click the RSS icon next to it and copy the URL (`https://www.google.com/alerts/feeds/<account>/<alert>`).
+4. Add it under `feeds` in `products.yaml` with `lang: da` for Danish alerts and `products: [<id>]` so the prefilter maps it to the right product.
+
+One alert per phrase works best; quoted phrases cut noise. Titles arrive with `<b>` highlighting, which the parser strips.
+
 ## Run
 
 ```sh

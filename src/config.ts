@@ -54,7 +54,7 @@ const ProductSchema = z.object({
 
 const ConfigSchema = z.object({
   products: z.array(ProductSchema).min(1),
-  feeds: z.array(FeedSchema).default([]),
+  feeds: z.array(FeedSchema).nullish().transform((v) => v ?? []), // a "feeds:" key with only comments parses as null
 });
 
 export type Product = z.infer<typeof ProductSchema>;
