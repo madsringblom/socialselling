@@ -640,6 +640,23 @@ export function draftCandidates(a: { since: number; minConfidence: number }): Sc
     .map(toScored);
 }
 
+/**
+ * Scored items with at least one 'default' draft, created after `createdAfter` (epoch seconds; i.e. not yet expired).
+ * Ordered asking_for_tool first, then by tier rank, confidence desc, newest first. Used by the UI's Today list.
+ */
+export function draftedItems(createdAfter: number): ScoredItem[] {
+  return openDb()
+    .query<ScoredRow, { after: number }>(
+      `SELECT ${SCORED_COLS}
+       FROM scores s JOIN items i ON i.id = s.item_id
+       WHERE i.created_at > $after
+         AND EXISTS (SELECT 1 FROM drafts d WHERE d.item_id = s.item_id AND d.variant = 'default')
+       ORDER BY ${TIER_RANK_SQL("s.tier")}, s.confidence DESC, i.created_at DESC`,
+    )
+    .all({ after: createdAfter })
+    .map(toScored);
+}
+
 // ---------------------------------------------------------------- actions
 
 type ActionDbRow = { id: number; kind: string; target_id: string; payload_json: string; created_at: number };

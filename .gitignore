@@ -39,3 +39,4 @@ data/
 # private: product profiles and daily reports (contain third-party post snippets)
 products.yaml
 reports/
+.claude/
