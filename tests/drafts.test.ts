@@ -80,6 +80,17 @@ describe("with a database", () => {
     expect(eligible(ctx, 0)).toEqual([]);
   });
 
+  test("items flagged old_or_locked or already_answered are not drafted", () => {
+    const flags = { already_answered: false, old_or_locked: false, mentions_competitor: false, non_english: false };
+    seedItem({ id: "reddit:t3_locked" });
+    seedScore("reddit:t3_locked", { matched_product: "alpha", flags: { ...flags, old_or_locked: true } });
+    seedItem({ id: "reddit:t3_answered" });
+    seedScore("reddit:t3_answered", { matched_product: "alpha", flags: { ...flags, already_answered: true } });
+    seedItem({ id: "reddit:t3_ok" });
+    seedScore("reddit:t3_ok", { matched_product: "alpha", flags });
+    expect(eligible(testCtx(minimalConfig()), 10).map((r) => r.id)).toEqual(["reddit:t3_ok"]);
+  });
+
   test("run inserts default + no_link drafts and reports cost", async () => {
     seedItem({ id: "reddit:t3_ask" });
     seedScore("reddit:t3_ask", { matched_product: "alpha" });

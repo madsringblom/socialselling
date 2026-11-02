@@ -60,13 +60,15 @@ export function entityId(domain: string | null, normalizedName: string): string 
   return `lead_${new Bun.CryptoHasher("sha256").update(domain ?? normalizedName).digest("hex").slice(0, 10)}`;
 }
 
-/** Pending items from the last 7 run days: articles, plus posts/comments matched to a product with lead_research. */
+/** Pending articles, posts and comments from the last 7 run days, matched to a product with lead_research. */
 export function extractionCandidates(ctx: PlayCtx): ScoredItem[] {
   const research = new Set(ctx.cfg.products.filter((p) => p.plays.lead_research).map((p) => p.id));
+  if (research.size === 0) return [];
   return itemsPendingEntities(addDays(ctx.runDate, -LOOKBACK_DAYS)).filter(
     (it) =>
       it.matched_product !== null &&
-      (it.kind === "article" || ((it.kind === "post" || it.kind === "comment") && research.has(it.matched_product))),
+      research.has(it.matched_product) &&
+      (it.kind === "article" || it.kind === "post" || it.kind === "comment"),
   );
 }
 
@@ -195,7 +197,8 @@ export async function run(ctx: PlayCtx, api: EntityApi = realApi): Promise<PlayR
       result.costUsd += costUsd(out.usage, MODEL);
       for (const r of out.results) {
         const item = batch[r.i];
-        if (!item || !r.entity || !item.matched_product) continue;
+        // Persons are never researched, so they are not stored either.
+        if (!item || !r.entity || r.entity.kind === "person" || !item.matched_product) continue;
         if (!normalizeName(r.entity.name.trim())) continue;
         touched.add(upsertFromExtraction(item, r.entity, ctx.runDate).id);
       }

@@ -567,23 +567,6 @@ export function scoredItem(itemId: string): ScoredItem | null {
   return row ? toScored(row) : null;
 }
 
-/** Scored items for the given ids, in the order of `ids` (unknown ids are dropped). */
-export function scoredItems(ids: string[]): ScoredItem[] {
-  if (ids.length === 0) return [];
-  const rows = openDb()
-    .query<ScoredRow, { ids: string }>(
-      `SELECT ${SCORED_COLS} FROM scores s JOIN items i ON i.id = s.item_id
-       WHERE s.item_id IN (SELECT value FROM json_each($ids))`,
-    )
-    .all({ ids: JSON.stringify(ids) })
-    .map(toScored);
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  return ids.flatMap((id) => {
-    const r = byId.get(id);
-    return r ? [r] : [];
-  });
-}
-
 // ---------------------------------------------------------------- drafts
 
 type DraftDbRow = Omit<DraftRow, "variant"> & { variant: string };
@@ -621,8 +604,8 @@ export function countDraftsSince(sinceEpoch: number): number {
 
 /**
  * Scored post/comment items worth a reply draft: tier asking_for_tool or describing_problem, confidence >= min,
- * created at or after `since`, no draft yet, and no 'skip' or 'posted' action ever recorded for the item
- * (a later 'undo_posted' does not bring it back). Ordered asking_for_tool first, then confidence desc.
+ * created at or after `since`, no draft yet, not flagged old_or_locked or already_answered, and no 'skip' or
+ * 'posted' action ever recorded for the item (a later 'undo_posted' does not bring it back). Ordered asking_for_tool first, then confidence desc.
  * Product filtering (plays.reply_drafts) is done by the caller.
  */
 export function draftCandidates(a: { since: number; minConfidence: number }): ScoredItem[] {
@@ -634,6 +617,8 @@ export function draftCandidates(a: { since: number; minConfidence: number }): Sc
          AND s.confidence >= $minConfidence AND i.created_at >= $since
          AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.item_id = s.item_id)
          AND NOT EXISTS (SELECT 1 FROM actions a WHERE a.target_id = s.item_id AND a.kind IN ('skip','posted'))
+         AND COALESCE(json_extract(s.flags, '$.old_or_locked'), 0) = 0
+         AND COALESCE(json_extract(s.flags, '$.already_answered'), 0) = 0
        ORDER BY CASE s.tier WHEN 'asking_for_tool' THEN 0 ELSE 1 END, s.confidence DESC, i.created_at DESC`,
     )
     .all({ since: a.since, minConfidence: a.minConfidence })

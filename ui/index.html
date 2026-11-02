@@ -701,11 +701,11 @@ a { color: var(--accent); }
 /* ---------- Data: filled from the local API (src/server.ts) ---------- */
 let DATA = {
   run: null, products: {}, replies: [], leads: [],
-  today: { leads: [], newGaps: 0, later: [] },
+  today: { gapsThisWeek: 0 },
   competitors: [], reviews: [], ideas: [], week: '',
   sources: [], plays: {}, playLocks: {}, schedule: '', runs: [], funnel: null, caps: null,
 };
-let REPLY = {}, LEAD = {}, COMP = {}, SOURCE = {};
+let REPLY = {}, LEAD = {}, COMP = {};
 let TODAY_ALL = [];
 
 /* ---------- Lookups and constants ---------- */
@@ -723,6 +723,8 @@ const TABS = ['today', 'pipeline', 'intel', 'setup'];
 const TITLES = { today: 'Today', pipeline: 'Pipeline', intel: 'Competitor intel', setup: 'Setup' };
 const TODAY_CAP = 5;
 const RESEARCH_WAIT_MS = 180000;
+const RESEARCH_POLL_MS = 15000;
+const RESEARCH_POLL_MAX_MS = 600000;
 const TIERS = { asking_for_tool: 'Asking for a tool', describing_problem: 'Describing a problem' };
 const STATUSES = [['new', 'New'], ['contacted', 'Contacted'], ['replied', 'Replied'], ['meeting', 'Meeting'], ['no_interest', 'No interest']];
 const STATUS_LABEL = Object.fromEntries(STATUSES);
@@ -747,7 +749,6 @@ const state = {
   leadFilter: 'all',
   statusFilter: 'all',
   queue: {},        // Today item id -> 'skipped' | 'later'
-  skipReason: {},   // Today item id -> reason key (feeds the filter)
   skipOpen: null,   // open skip chooser: 'card|<id>' | 'detail|<id>'
   open: {},         // <details> open state by data-key
   reply: {},        // per reply: draft text, variant, rating, posted, direction (typed text survives reloads)
@@ -768,7 +769,7 @@ async function api(path, body, timeoutMs) {
 
 function mapRun(r) {
   if (!r) return DATA.run;
-  return { label: r.label, week: Number(String(r.week).split('-W')[1]) || '', next: r.next, hoursToNoon: r.hours_to_noon };
+  return { label: r.label, next: r.next, hoursToNoon: r.hours_to_noon };
 }
 
 function mergeProducts(products) {
@@ -815,7 +816,8 @@ function initReply(r) {
     const variant = r.current && r.current.variant === 'redraft' ? 'redraft' : 'default';
     state.reply[r.id] = {
       variant, base: variant, text: (r.current && r.current.text) || r.drafts.default,
-      rating: r.rating, posted: r.state === 'posted', undoTimer: null, direction: '', busy: false,
+      rating: r.rating, posted: r.state === 'posted', undoTimer: null, pending: null, direction: '', busy: false,
+      texts: {},  // edited text per variant key (see draftKey), so toggling "Without link" keeps edits
     };
     return;
   }
@@ -826,7 +828,7 @@ function initReply(r) {
 function initLead(l) {
   const ex = state.lead[l.id];
   if (!ex) {
-    state.lead[l.id] = { status: l.status, note: l.note || '', showAll: false, inSalgsro: l.inSalgsro, csvPath: l.csvPath, researching: false, adding: false };
+    state.lead[l.id] = { status: l.status, note: l.note || '', showAll: false, inSalgsro: l.inSalgsro, csvPath: l.csvPath, researching: false, waiting: false, adding: false };
     return;
   }
   ex.status = l.status;
@@ -854,9 +856,7 @@ async function loadToday() {
   leads.forEach(initLead);
   Object.assign(REPLY, index(DATA.replies));
   Object.assign(LEAD, index(leads));
-  DATA.today.leads = leads.map(l => l.id);
-  DATA.today.later = d.later.map(x => x.id);
-  DATA.today.newGaps = d.counts.intel_new_gaps;
+  DATA.today.gapsThisWeek = d.counts.intel_gaps_this_week;
   TODAY_ALL = all.map(x => ({ kind: x.kind, id: x.id }));
   d.items.forEach(x => { delete state.queue[x.id]; });
   d.later.forEach(x => { state.queue[x.id] = 'later'; });
@@ -895,7 +895,6 @@ async function loadSetup() {
   DATA.run = mapRun(d.run);
   DATA.funnel = { fetched: d.funnel.fetched, bySource: d.funnel.by_source, signals: d.funnel.signals, actions: d.funnel.actions, cost: d.funnel.cost };
   DATA.sources = d.sources;
-  SOURCE = index(DATA.sources);
   DATA.plays = d.plays;
   DATA.playLocks = d.play_locks;
   d.products.forEach(p => {
@@ -1123,7 +1122,7 @@ function section(key, title, items, o, viewAll) {
 function todayList(selected) {
   const { open, shown, later } = todayQueue(selected);
   const o = { selected, today: true };
-  const intel = `<p class="meta">Competitor intel: <span class="mono">${DATA.today.newGaps}</span> new gaps this week <a class="link" href="#intel"><span aria-hidden="true">→ </span>Intel</a></p>`;
+  const intel = `<p class="meta">Competitor intel: <span class="mono">${DATA.today.gapsThisWeek}</span> gaps this week <a class="link" href="#intel"><span aria-hidden="true">→ </span>Intel</a></p>`;
   const laterHtml = later.length
     ? disclosure('later', `Later (${later.length})`, `<div class="cards">${later.map(i => cardFor(i, { ...o, later: true })).join('')}</div>`)
     : '';
@@ -1180,6 +1179,20 @@ function postButtonInner(s) {
   return s.posted ? 'Undo' : 'Mark as posted';
 }
 
+const stripLinks = t => t.replace(/https?:\/\/\S+/g, '').replace(/[ \t]{2,}/g, ' ').trim();
+/* Key for the per-variant edited text: the no-link version of a redraft is kept apart from the stored no-link draft. */
+const draftKey = s => (s.variant === 'nolink' && s.base === 'redraft' ? 'nolink-redraft' : s.variant);
+/* The server's text for the current variant; without link after a redraft = the redraft with URLs stripped. */
+function storedDraft(r, s) {
+  if (s.variant === 'nolink' && s.base === 'redraft' && r.drafts.redraft) return stripLinks(r.drafts.redraft);
+  return r.drafts[s.variant];
+}
+/* "This draft has no link already": the no-link text equals the text it was derived from. */
+function noLinkSame(r, s) {
+  if (s.base === 'redraft' && r.drafts.redraft) return stripLinks(r.drafts.redraft) === r.drafts.redraft.trim();
+  return r.drafts.nolink === r.drafts.default;
+}
+
 function redraftButton(id) {
   const s = state.reply[id];
   return `<button type="button" class="btn" data-action="redraft" data-arg="${esc(id)}"${s.busy ? ' aria-disabled="true" aria-busy="true"' : ''}>${s.busy ? 'Redrafting…' : 'Redraft'}</button>`;
@@ -1190,7 +1203,7 @@ function replyDetail(r) {
   const id = r.id;
   const d = domId(id);
   const a = esc(id);
-  const sameNoLink = r.drafts.nolink === r.drafts.default;
+  const sameNoLink = noLinkSame(r, s);
   const final = s.posted && !s.undoTimer;
   const rateBtn = (v, label) => `<button type="button" class="btn btn-ghost" id="rate-${d}-${v}" aria-pressed="${s.rating === v}" data-action="rate" data-arg="${esc(`${id}|${v}`)}">${label}</button>`;
   return `<div class="detail">
@@ -1253,7 +1266,7 @@ function syncDraft(id) {
   const toggle = $(`nolink-${d}`);
   if (toggle) toggle.setAttribute('aria-pressed', String(s.variant === 'nolink'));
   const help = $(`nolink-help-${d}`);
-  if (help) help.hidden = !(s.variant === 'nolink' && r.drafts.nolink === r.drafts.default);
+  if (help) help.hidden = !(s.variant === 'nolink' && noLinkSame(r, s));
 }
 
 function syncRedraft(id) {
@@ -1316,7 +1329,7 @@ function syncSalgsro(id) {
 
 function researchButton(l) {
   const s = state.lead[l.id];
-  const label = s.researching ? 'Researching… (1–3 min)' : l.lastResearched ? 'Research again' : 'Run research';
+  const label = s.waiting ? 'Still researching…' : s.researching ? 'Researching… (1–3 min)' : l.lastResearched ? 'Research again' : 'Run research';
   return `<button type="button" class="btn btn-ghost" data-action="research" data-arg="${esc(l.id)}"${s.researching ? ' aria-disabled="true" aria-busy="true"' : ''}>${label}</button>`;
 }
 
@@ -1325,6 +1338,24 @@ function syncResearch(id) {
     const el = $(`research-${domId(id)}`);
     if (el && LEAD[id]) el.innerHTML = researchButton(LEAD[id]);
   });
+}
+
+/* After the research request timed out: poll the pipeline every 15 s until the lead's research changes
+   (last_researched, or research_cost_usd for a second research on the same day), at most 10 minutes. */
+async function waitForResearch(id, before) {
+  const until = Date.now() + RESEARCH_POLL_MAX_MS;
+  while (Date.now() < until) {
+    await new Promise(done => setTimeout(done, RESEARCH_POLL_MS));
+    try {
+      const d = await api('/api/pipeline');
+      const dto = d.leads.find(x => x.id === id);
+      if (dto && (dto.last_researched !== before.at || (dto.research_cost_usd || 0) !== before.cost)) {
+        upsertLeadDto(dto);
+        return true;
+      }
+    } catch (_) { /* try again on the next tick */ }
+  }
+  return false;
 }
 
 function leadHead(l) {
@@ -1855,9 +1886,10 @@ const ACTIONS = {
   nolink(id) {
     const s = state.reply[id];
     const r = REPLY[id];
+    s.texts[draftKey(s)] = s.text;
     if (s.variant === 'nolink') s.variant = s.base || 'default';
     else { s.base = s.variant; s.variant = 'nolink'; }
-    s.text = r.drafts[s.variant] || r.drafts.default;
+    s.text = s.texts[draftKey(s)] ?? storedDraft(r, s) ?? r.drafts.default;
     syncDraft(id);
   },
   async redraft(id) {
@@ -1872,6 +1904,8 @@ const ACTIONS = {
       s.variant = 'redraft';
       s.base = 'redraft';
       s.text = res.draft.text;
+      s.texts.redraft = res.draft.text;
+      delete s.texts['nolink-redraft']; // its no-link text derives from the new redraft
       syncDraft(id);
       toast('Redrafted');
     } catch (e) {
@@ -1922,12 +1956,18 @@ const ACTIONS = {
     }
     syncPost(id);
     keep(renderList);
+    let mine = null;
     try {
-      await api(`/api/items/${enc(id)}/${path}`, {});
+      // An undo must reach the server after the 'posted' it undoes.
+      if (path === 'undo-posted' && s.pending) await s.pending.catch(() => {});
+      mine = s.pending = api(`/api/items/${enc(id)}/${path}`, {});
+      await mine;
     } catch (e) {
       clearTimeout(s.undoTimer);
       s.undoTimer = null;
       await fail(e);
+    } finally {
+      if (s.pending === mine) s.pending = null;
     }
   },
   async status(arg) {
@@ -1992,13 +2032,23 @@ const ACTIONS = {
     s.researching = true;
     syncResearch(id);
     toast('Researching. This takes 1–3 minutes');
+    const l0 = LEAD[id];
+    const before = { at: l0 ? l0.lastResearched : null, cost: l0 ? l0.researchCost : 0 };
     let res = null;
     let timedOut = false;
     try {
       res = await api(`/api/leads/${enc(id)}/research`, {}, RESEARCH_WAIT_MS);
     } catch (e) {
       timedOut = e && e.name === 'TimeoutError';
-      toast(timedOut ? 'Research is still running on the server. Showing what is saved so far' : e.message);
+      toast(timedOut ? 'Research is still running on the server. Checking every 15 seconds' : e.message);
+    }
+    if (timedOut) {
+      // Keep the button disabled while the server finishes; poll for the stored result.
+      s.waiting = true;
+      syncResearch(id);
+      const done = await waitForResearch(id, before);
+      s.waiting = false;
+      toast(done ? 'Research finished' : 'Research did not finish within 10 minutes. Showing what is saved');
     }
     s.researching = false;
     if (res && res.lead) {

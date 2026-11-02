@@ -22,7 +22,7 @@ const MAX_CALL_BRIEF = 5;
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const roundPoints = (n: number) => (Number.isFinite(n) ? Math.round(n) : 0);
 const trimOrNull = (s: string | null | undefined): string | null => s?.trim() || null;
-const httpOrNull = (s: string | null | undefined): string | null => {
+export const httpOrNull = (s: string | null | undefined): string | null => {
   const t = s?.trim();
   return isHttpUrl(t) ? t : null;
 };

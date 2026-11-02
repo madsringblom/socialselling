@@ -134,7 +134,7 @@ export type TodayDTO = {
   run: RunInfo;
   items: (ReplyDTO | LeadDTO)[];
   later: (ReplyDTO | LeadDTO)[];
-  counts: { open: number; expiring_before_noon: number; intel_new_gaps: number };
+  counts: { open: number; expiring_before_noon: number; intel_gaps_this_week: number };
   products: ProductNames;
 };
 
@@ -425,7 +425,7 @@ export function today(cfg: Config, now: number): TodayDTO {
     counts: {
       open: items.length,
       expiring_before_noon: items.filter((i) => i.kind === "reply" && i.expires_at < noon).length,
-      intel_new_gaps: digest(cfg, isoWeek(date).key, now).gaps.length,
+      intel_gaps_this_week: digest(cfg, isoWeek(date).key, now).gaps.length,
     },
     products: productNames(cfg),
   };

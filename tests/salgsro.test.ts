@@ -78,6 +78,21 @@ describe("csv", () => {
     expect(csvRow(bare)).toEqual(["", "Bare Klub", "", "", "", "", "Lead", "WATCH 37/100"]);
   });
 
+  test("formula-looking text cells get an apostrophe; phone stays unchanged", () => {
+    const l = lead({
+      id: "lead_f",
+      org_name: '=HYPERLINK("x")',
+      contacts: [{ name: "@jens", role: "-Formand", email: "f@x.dk", phone: "+45 12 34 56 78", source_url: "https://x.dk", retrieved_date: null }],
+    });
+    const cells = buildCsv([l]).split("\r\n")[1]!.split(";");
+    expect(cells[0]).toBe("'@jens");
+    expect(cells[1]).toBe(`"'=HYPERLINK(""x"")"`); // the parsed cell is '=HYPERLINK("x")
+    expect(cells[3]).toBe("+45 12 34 56 78");
+    expect(cells[5]).toBe("'-Formand");
+    expect(csvField("=1+1")).toBe("=1+1");
+    expect(csvField("=1+1", true)).toBe("'=1+1");
+  });
+
   test("at most 200 rows", () => {
     const one = lead({ id: "lead_c" });
     const csv = buildCsv(Array.from({ length: 201 }, () => one));

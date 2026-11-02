@@ -8,7 +8,7 @@ import { topSignal } from "./leadscore.ts";
 /** Salgsro's import columns (Danish), in order. */
 export const CSV_HEADER = ["Navn", "Firma", "E-mail", "Telefon", "Hjemmeside", "Rolle", "Fase", "Noter"];
 export const MAX_EXPORT = 200;
-const BOM = "﻿";
+const BOM = String.fromCharCode(0xfeff); // UTF-8 BOM so Excel reads the file as UTF-8
 
 /** One CSV row: the first public contact (or blanks), the organisation, and a short note with score, brief and source. */
 export function csvRow(l: LeadRow): string[] {
@@ -20,15 +20,23 @@ export function csvRow(l: LeadRow): string[] {
   return [c?.name ?? "", l.org_name, c?.email ?? "", c?.phone ?? "", l.website ?? "", c?.role ?? "", "Lead", notes.join(" · ")];
 }
 
-/** Quotes a field when it contains the separator, a double quote or a line break (quotes doubled). */
-export function csvField(s: string): string {
-  return /[;"\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+const FORMULA_START = /^[=+\-@\t\r]/;
+/** Free-text columns get a leading apostrophe when they look like a spreadsheet formula. */
+const TEXT_COLS = new Set([0, 1, 5, 7]); // Navn, Firma, Rolle, Noter
+
+/**
+ * Quotes a field when it contains the separator, a double quote or a line break (quotes doubled). With `text`, a
+ * value starting with = + - @ tab or CR is prefixed with an apostrophe so spreadsheets do not run it as a formula.
+ */
+export function csvField(s: string, text = false): string {
+  const v = text && FORMULA_START.test(s) ? `'${s}` : s;
+  return /[;"\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
 /** UTF-8 BOM + header + at most 200 lead rows, ";"-separated, CRLF line endings. */
 export function buildCsv(leads: LeadRow[]): string {
   const rows = [CSV_HEADER, ...leads.slice(0, MAX_EXPORT).map(csvRow)];
-  return BOM + rows.map((r) => r.map(csvField).join(";")).join("\r\n");
+  return BOM + rows.map((r) => r.map((f, i) => csvField(f, TEXT_COLS.has(i))).join(";")).join("\r\n");
 }
 
 /**

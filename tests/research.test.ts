@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { MAX_RESEARCH_PER_DAY, RESEARCH_MODEL, addDays } from "../src/config.ts";
 import { getLead, linkEntityItem, setLeadStatus } from "../src/db.ts";
 import { costUsd } from "../src/llm.ts";
-import { PARSE_SYSTEM, apiFrom, collectBlocks, investigate, run, RESEARCH_EFFORT } from "../src/plays/research.ts";
+import { PARSE_SYSTEM, ResearchFailed, apiFrom, collectBlocks, investigate, run, RESEARCH_EFFORT } from "../src/plays/research.ts";
 import type { LeadOutput, ResearchApi, ResearchClient } from "../src/plays/research.ts";
 import { fakeUsage, minimalConfig, seedEntity, seedItem, seedLead, seedScore, tempDb, testCtx } from "./helpers.ts";
 
@@ -99,7 +99,7 @@ describe("with a database", () => {
       },
     };
     const expectedCost = [...createUsage, parseUsage].reduce((a, u) => a + costUsd(u, RESEARCH_MODEL), 0);
-    return { client, calls, parseCalls, expectedCost };
+    return { client, calls, parseCalls, expectedCost, createUsage };
   }
 
   function seedOrg() {
@@ -196,6 +196,21 @@ describe("with a database", () => {
     await expect(investigate(entity, ctx, apiFrom(fake.client))).rejects.toThrow("research refused");
     expect(fake.parseCalls.length).toBe(0);
     expect(getLead(entity.id)).toBeNull();
+  });
+
+  test("a refusal carries the cost spent so far", async () => {
+    const ctx = testCtx(minimalConfig());
+    const entity = seedOrg();
+    const fake = fakeClient({ stops: ["refusal"], next: () => output([]) });
+    let err: unknown = null;
+    try {
+      await investigate(entity, ctx, apiFrom(fake.client));
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(ResearchFailed);
+    expect((err as ResearchFailed).costUsd).toBeCloseTo(costUsd(fake.createUsage[0]!, RESEARCH_MODEL), 10);
+    expect((err as ResearchFailed).costUsd).toBeGreaterThan(0);
   });
 
   test("run respects the daily cap and skips leads researched in the last 30 days", async () => {

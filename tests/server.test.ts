@@ -243,4 +243,9 @@ describe("errors", () => {
     });
     expect(r.status).toBe(403);
   });
+
+  test("a foreign Host header is refused (DNS rebinding)", async () => {
+    const r = await fetch(`${base}/api/today`, { headers: { host: "evil.example" } });
+    expect(r.status).toBe(403);
+  });
 });

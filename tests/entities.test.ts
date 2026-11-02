@@ -122,6 +122,40 @@ describe("with a database", () => {
     expect(calls).toBe(1);
   });
 
+  test("run makes no API calls when no product has lead_research", async () => {
+    const base = minimalConfig();
+    const cfg = { ...base, products: base.products.map((p) => ({ ...p, plays: { ...p.plays, lead_research: false } })) };
+    const ctx = testCtx(cfg);
+    seedPending(ctx.runDate);
+    let calls = 0;
+    const api: EntityApi = {
+      async extract() {
+        calls++;
+        return { results: [], usage: fakeUsage(0, 0) };
+      },
+    };
+    const res = await run(ctx, api);
+    expect(calls).toBe(0);
+    expect(res.count).toBe(0);
+    expect(scoreEntitiesAt(t.db, "art")).toBeNull();
+  });
+
+  test("run does not store person entities", async () => {
+    const ctx = testCtx(minimalConfig());
+    seedPending(ctx.runDate);
+    const api: EntityApi = {
+      async extract(_system, user) {
+        const items = JSON.parse(user.slice(user.indexOf("\n\n") + 2)) as { i: number }[];
+        return { results: items.map((x) => ({ i: x.i, entity: { ...org("Jens Hansen"), kind: "person" as const } })), usage: fakeUsage(100, 10) };
+      },
+    };
+    const res = await run(ctx, api);
+    expect(res.errors).toEqual([]);
+    expect(res.count).toBe(0);
+    expect(getEntity(entityId(null, "jens hansen"))).toBeNull();
+    expect(scoreEntitiesAt(t.db, "beta_post")).toBe(ctx.now);
+  });
+
   test("a failing batch stays pending and is reported", async () => {
     const ctx = testCtx(minimalConfig());
     seedPending(ctx.runDate);

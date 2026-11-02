@@ -144,6 +144,13 @@ function floatEnv(name: string, fallback: number): number {
   return n;
 }
 
+function enumEnv<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  if (!(allowed as readonly string[]).includes(raw)) throw new Error(`${name} must be one of ${allowed.join(", ")}, got "${raw}"`);
+  return raw as T;
+}
+
 export const TZ = process.env.TZ?.trim() || "Europe/Copenhagen";
 export const MODEL = process.env.CLAUDE_MODEL?.trim() || "claude-haiku-5-5";
 export const REDDIT_USERNAME = process.env.REDDIT_USERNAME?.trim() || "";
@@ -156,6 +163,8 @@ export const RESEARCH_MODEL = process.env.RESEARCH_MODEL?.trim() || "claude-opus
 export const MAX_DRAFTS_PER_DAY = intEnv("MAX_DRAFTS_PER_DAY", 5);
 export const DRAFT_MIN_CONFIDENCE = floatEnv("DRAFT_MIN_CONFIDENCE", 0.6);
 export const MAX_RESEARCH_PER_DAY = intEnv("MAX_RESEARCH_PER_DAY", 3);
+/** Research turn effort: "high" is noticeably more thorough but roughly doubles the cost per lead. */
+export const RESEARCH_EFFORT = enumEnv("RESEARCH_EFFORT", ["low", "medium", "high"] as const, "medium");
 export const DRAFT_EXPIRY_H = intEnv("DRAFT_EXPIRY_H", 24);
 export const UI_PORT = intEnv("UI_PORT", 8787);
 

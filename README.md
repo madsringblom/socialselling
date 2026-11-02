@@ -26,7 +26,7 @@ cp products.example.yaml products.yaml  # describe your products (git-ignored)
 | `RESEARCH_EFFORT` | `medium` | research turn effort: `low`, `medium` or `high` (more thorough, roughly 2x cost) |
 | `MAX_DRAFTS_PER_DAY` | `5` | reply drafts per local day (redrafts from the UI not counted) |
 | `DRAFT_MIN_CONFIDENCE` | `0.6` | minimum triage confidence for a reply draft |
-| `MAX_RESEARCH_PER_DAY` | `3` | organisations researched by the daily run (on-demand research from the UI not counted) |
+| `MAX_RESEARCH_PER_DAY` | `3` | organisations researched by the daily run (on-demand research from the UI or CLI is not capped, but counts toward the cap for the rest of the day) |
 | `DRAFT_EXPIRY_H` | `24` | a draft leaves Today this many hours after the post was created |
 | `UI_PORT` | `8787` | port of the local web UI |
 | `DB_PATH` | `data/social.db` | SQLite file (tests point it at a temp dir) |
@@ -106,7 +106,7 @@ bun test                                   # unit and API tests; temp DB, no net
 After scoring, the daily run turns the day's signals into plays (`src/plays/`). Each play runs on its own: one failing play is listed under errors and the others still run. Which plays run is set per product with `plays` in `products.yaml` (see Tuning). The report's summary has a `Plays:` line (drafts, researched, ideas, cost) and the plays' cost is included in the day's API cost.
 
 - **Reply drafts** (`plays.reply_drafts`, default on). For `asking_for_tool` and `describing_problem` posts and comments with confidence ≥ `DRAFT_MIN_CONFIDENCE` that are younger than `DRAFT_EXPIRY_H` and were not skipped or posted, `DRAFT_MODEL` writes two variants in one call: a draft that may name the product and include `voice.link`, and the same help without a link. Drafts help first, name the product at most once, follow `voice.never_claim`, and write in the language of the post (≤ 900 characters). At most `MAX_DRAFTS_PER_DAY` items per local day, best tier and confidence first. Cost: roughly $0.02–0.05 per draft on Opus. You copy and post them by hand; nothing is sent.
-- **Entities** (runs when any product has `lead_research`). Haiku reads non-irrelevant posts, comments and articles in batches of 10 and names the organisation (or person) each is about. Organisations are deduplicated by website domain, then by normalised name. A fraction of a cent per batch.
+- **Entities** (runs when any product has `lead_research`). Haiku reads non-irrelevant posts, comments and articles matched to a product with `lead_research` in batches of 10 and names the organisation each is about. Persons are recognised but not stored. Organisations are deduplicated by website domain, then by normalised name. A fraction of a cent per batch.
 - **Lead research** (`plays.lead_research`, default off). Researches up to `MAX_RESEARCH_PER_DAY` organisations per day, most-mentioned first, with `RESEARCH_MODEL` plus web search and web fetch (at most 8 searches and 8 fetches per organisation), then turns the notes into a scored lead with signals, digital stack, public contacts and a five-line Danish call brief. Cost: roughly **$1.4 per lead** at `RESEARCH_EFFORT=medium` (tokens plus web search at $10 per 1,000 searches); `high` is more thorough and roughly doubles it.
 - **Competitor intel** (`plays.competitor_intel`, default on when the product lists `competitors`). Sorts the week's competitor App Store reviews into gaps, praise and switching intent, and once per product and ISO week turns the gaps into at most 3 small ideas (comparison page, help article, feature or post). One Haiku call per product per week, well under a cent.
 
@@ -117,7 +117,7 @@ Expect triage to cost cents per day, drafts up to about $0.25 per day at the def
 - Organisations only. Persons are never researched, and contact details are limited to what an organisation publishes itself for organisational purposes.
 - Evidence first: every FACT needs a source URL the investigator saw. A FACT without a URL is downgraded to HYPOTHESIS (member counts to INFERENCE), stack entries and contacts without a URL are dropped, and score components for intent, pain and fit without an evidence URL score 0. Scores are recomputed in code with the rubric's caps (intent 35, pain 25, fit 20, timing 10, reachability 10): HOT ≥ 75, STRONG 55–74, WATCH 35–54, ARCHIVE below.
 - A lead is re-researched at most every 30 days by the daily run; new findings are merged into the existing lead (status, note and Salgsro export are kept).
-- "Run research" in the UI (or `bun src/plays/research.ts <lead id>`) researches one organisation now and bypasses `MAX_RESEARCH_PER_DAY` by design. It takes 1–3 minutes and costs the same as a daily research.
+- "Run research" in the UI (or `bun src/plays/research.ts <lead id>`) researches one organisation now and bypasses `MAX_RESEARCH_PER_DAY` by design (it still counts toward that day's cap, so the daily run researches fewer). It takes 1–3 minutes and costs the same as a daily research.
 
 ### Import existing leads
 
@@ -135,16 +135,16 @@ bun run ui                                 # http://127.0.0.1:8787 (UI_PORT)
 
 A local web UI over the same database. It listens on 127.0.0.1 only and has **no authentication**: do not expose it, port-forward it or put it behind a reverse proxy. Requests from other hosts or other web pages are refused, but anyone who can reach the port can use it. Reading works without an API key; redraft and research need `ANTHROPIC_API_KEY` (Bun loads `.env`).
 
-- **Today**: at most 5 things to act on. Reply drafts that have not expired (edit, toggle the no-link variant, redraft with a direction, rate, copy, mark as posted, skip with a reason or move to Later), then new leads from the last 7 days (status new, not yet in Salgsro). Every item ends in act, skip or later.
+- **Today**: at most 5 things to act on. Reply drafts that have not expired (edit, toggle the no-link variant, redraft with a direction (rewrites the stored draft, not the text you edited in the box), rate, copy, mark as posted, skip with a reason or move to Later), then new leads from the last 7 days (status new, not yet in Salgsro). Every item ends in act, skip or later.
 - **Pipeline**: every lead by score, filtered by class and status. Lead detail has the call brief, pipeline status, a feedback note, score breakdown, signals with sources, digital stack and public contacts, plus "Run research" / "Research again" (1–3 minutes, about $1.4) and "Add to Salgsro".
 - **Intel**: this week's competitor reviews as gaps, praise and switching intent, and the week's ideas (save or dismiss).
-- **Setup**: today's run funnel, sources, plays per product, caps, products and the last runs. Read-only: change `products.yaml` or `.env` and the next run picks it up.
+- **Setup**: today's run funnel, sources, plays per product, caps, products and the last runs. Read-only: change `products.yaml` or `.env` and the next run picks it up; restart `bun run ui` for the UI to see the change.
 
 Skips, ratings, posted marks, status changes, notes and idea decisions are stored as actions in the database; skipped and posted items are never drafted again.
 
 ### Add to Salgsro
 
-"Add to Salgsro" (one lead in its detail, or "Add top leads to Salgsro" in Pipeline for HOT and STRONG leads you tick) writes a CSV file to `data/salgsro/leads-YYYY-MM-DD-HHmm.csv` (`SALGSRO_DIR`) and shows its path with a copy button. Import that file with Salgsro's CSV import wizard. The file is UTF-8 with a BOM, `;`-separated, CRLF line endings, at most 200 leads, with Salgsro's Danish columns: `Navn;Firma;E-mail;Telefon;Hjemmeside;Rolle;Fase;Noter` (first public contact, organisation, website, `Fase` = `Lead`, and a note with classification, score, the first two call-brief lines and the strongest source). Exported leads leave Today and show "In Salgsro" in Pipeline. Nothing is sent to Salgsro automatically.
+"Add to Salgsro" (one lead in its detail, or "Add top leads to Salgsro" in Pipeline for HOT and STRONG leads you tick) writes a CSV file to `data/salgsro/leads-YYYY-MM-DD-HHmm.csv` (`SALGSRO_DIR`) and shows its path with a copy button. Import that file with Salgsro's CSV import wizard. The file is UTF-8 with a BOM, `;`-separated, CRLF line endings, at most 200 leads, with Salgsro's Danish columns: `Navn;Firma;E-mail;Telefon;Hjemmeside;Rolle;Fase;Noter` (first public contact, organisation, website, `Fase` = `Lead`, and a note with classification, score, the first two call-brief lines and the strongest source). A Navn, Firma, Rolle or Noter value that starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading apostrophe (`'`) so spreadsheets show it as text instead of running it as a formula; phone numbers such as `+45 …` are left as they are. Exported leads leave Today and show "In Salgsro" in Pipeline. Nothing is sent to Salgsro automatically.
 
 ## Schedule (launchd, daily 07:00)
 

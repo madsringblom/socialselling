@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
-import { MAX_RESEARCH_PER_DAY, RESEARCH_MODEL, addDays, loadConfig, localDate, requireApiKey } from "../config.ts";
+import { MAX_RESEARCH_PER_DAY, RESEARCH_EFFORT, RESEARCH_MODEL, addDays, loadConfig, localDate, requireApiKey } from "../config.ts";
 import type { Config, Product } from "../config.ts";
 import { countLeadsResearchedOn, entityItems, getEntity, getLead, researchQueue, upsertLead } from "../db.ts";
 import type { EntityRow, LeadRow, ScoredItem } from "../db.ts";
@@ -10,8 +10,7 @@ import { errMsg } from "../strategies/shared.ts";
 import type { PlayCtx, PlayResult } from "./index.ts";
 import { mergeLead, sanitize } from "./leadscore.ts";
 
-/** Research turn effort: "high" is noticeably more thorough but roughly doubles the cost per lead. */
-export const RESEARCH_EFFORT = (process.env.RESEARCH_EFFORT?.trim() || "medium") as "low" | "medium" | "high";
+export { RESEARCH_EFFORT };
 
 type Log = (m: string) => void;
 
@@ -294,14 +293,14 @@ export async function investigateLoop(client: ResearchClient, system: string, us
       messages.push({ role: "assistant", content: res.content as Anthropic.Messages.ContentBlockParam[] });
       continue;
     }
-    if (stop === "refusal") throw new Error("research refused");
+    if (stop === "refusal") throw new ResearchFailed("research refused", cost);
     if ((stop === "max_tokens" || stop === "model_context_window_exceeded") && texts.join("").trim().length === 0) {
-      throw new Error(`research hit ${stop} with no text`);
+      throw new ResearchFailed(`research hit ${stop} with no text`, cost);
     }
     break;
   }
   if (stop === "pause_turn" && texts.join("").trim().length === 0) {
-    throw new Error(`research still paused after ${MAX_TURNS} turns with no text`);
+    throw new ResearchFailed(`research still paused after ${MAX_TURNS} turns with no text`, cost);
   }
   return { text: texts.join("\n\n").trim(), urls: [...urls], usage, toolErrors, stop, turns };
 }
@@ -400,7 +399,7 @@ ${evidence.length > 0 ? evidence.join("\n") : "- none"}
 Research objective: find and label public evidence across the six signal families, record the digital stack and organisational public contacts, then score per the rubric and write the call brief.`;
 }
 
-export const PARSE_SYSTEM = `Convert an investigator's research notes about one organisation into the structured lead record. Copy only what the notes contain; do not add findings. Every URL you output must appear in the notes or in the URLs seen list; never invent, shorten or repair a URL. A FACT without a URL becomes HYPOTHESIS (for member_count: INFERENCE). Keep Danish quotes as written. score_components points must match the notes; if a component is not scored in the notes use 0 with basis "not assessed". negative_adjustments only when the notes give points, a reason and a URL. call_brief is exactly 5 strings in Danish, in order: who to call, what they said, the pain, opening line, what not to say; use fewer only if the notes lack them. Dates as YYYY-MM-DD. Unknown or missing string values are an empty string "", never null; member_count is null only when the notes give no figure.`;
+export const PARSE_SYSTEM = `Convert an investigator's research notes about one organisation into the structured lead record. Copy only what the notes contain; do not add findings. Every URL you output must appear in the notes or in the URLs seen list; never invent, shorten or repair a URL. Keep Danish quotes as written. score_components points must match the notes; if a component is not scored in the notes use 0 with basis "not assessed". negative_adjustments only when the notes give points, a reason and a URL. call_brief is exactly 5 strings in Danish, in order: who to call, what they said, the pain, opening line, what not to say; use fewer only if the notes lack them. Dates as YYYY-MM-DD. Unknown or missing string values are an empty string "", never null; member_count is null only when the notes give no figure.`;
 
 export function parseUser(text: string, urls: string[]): string {
   return `Notes:\n${text}\n\nURLs seen:\n${urls.join("\n") || "(none)"}`;
@@ -410,6 +409,8 @@ export type InvestigateResult = {
   lead: LeadRow;
   costUsd: number;
   downgraded: number;
+  /** Signals whose source_url was not among the URLs the investigator saw. */
+  unseenUrls: number;
   newSignals: number;
   turns: number;
   toolErrors: string[];
@@ -450,6 +451,9 @@ export async function investigate(entity: EntityRow, ctx: PlayCtx, api: Research
   }
 
   const { lead: fresh, downgraded } = sanitize(parsed, ctx.runDate);
+  // Signal URLs the investigator never saw in a search result or fetch: worth a manual check.
+  const seen = new Set(inv.urls);
+  const unseenUrls = fresh.signals.filter((s) => s.source_url !== null && !seen.has(s.source_url)).length;
   // Fall back to what the entity already knows when the research left a field empty.
   fresh.org_name ||= entity.name;
   if (!fresh.website && entity.website) {
@@ -475,8 +479,10 @@ export async function investigate(entity: EntityRow, ctx: PlayCtx, api: Research
       };
   upsertLead(lead);
   const newSignals = lead.signals.length - (existing?.signals.length ?? 0);
-  log(`${lead.total}/${lead.classification} · signals ${lead.signals.length} (+${newSignals} new) · downgraded ${downgraded} · $${cost.toFixed(4)}`);
-  return { lead, costUsd: cost, downgraded, newSignals, turns: inv.turns, toolErrors: inv.toolErrors };
+  log(
+    `${lead.total}/${lead.classification} · signals ${lead.signals.length} (+${newSignals} new) · downgraded ${downgraded} · unseen URLs ${unseenUrls} · $${cost.toFixed(4)}`,
+  );
+  return { lead, costUsd: cost, downgraded, unseenUrls, newSignals, turns: inv.turns, toolErrors: inv.toolErrors };
 }
 
 /**
@@ -525,7 +531,7 @@ async function main(argv: string[]): Promise<void> {
   const r = await researchLead(id, loadConfig(), realApi, (m) => console.log(m));
   const l = r.lead;
   console.log(
-    `${l.org_name} · ${l.total}/${l.classification} · signals ${l.signals.length} (+${r.newSignals} new) · downgraded ${r.downgraded} · $${r.costUsd.toFixed(4)} · turns ${r.turns}`,
+    `${l.org_name} · ${l.total}/${l.classification} · signals ${l.signals.length} (+${r.newSignals} new) · downgraded ${r.downgraded} · unseen URLs ${r.unseenUrls} · $${r.costUsd.toFixed(4)} · turns ${r.turns}`,
   );
   if (r.toolErrors.length > 0) console.log(`tool errors: ${r.toolErrors.join(", ")}`);
 }

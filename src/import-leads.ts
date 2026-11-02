@@ -9,7 +9,7 @@ import type { Config } from "./config.ts";
 import { getLead, insertEntity, upsertLead } from "./db.ts";
 import type { Contact, LeadRow, MemberCount, ScoreComponent, ScoreJson, Signal, StackEntry } from "./db.ts";
 import { canonicalDomain, normalizeName } from "./plays/entities.ts";
-import { scoreLead } from "./plays/leadscore.ts";
+import { httpOrNull, scoreLead } from "./plays/leadscore.ts";
 import { errMsg } from "./strategies/shared.ts";
 
 /** The subset of the mio-lead-research lead record (mio-leads/README.md) that is imported. */
@@ -57,7 +57,8 @@ function component(c: ScoreComponent | undefined): ScoreComponent {
 export function mapLead(raw: RawLead, productId: string, today = localDate()): LeadRow {
   if (typeof raw.id !== "string" || !raw.id) throw new Error("missing id");
   if (typeof raw.org_name !== "string" || !raw.org_name.trim()) throw new Error("missing org_name");
-  const website = raw.website?.trim() || null;
+  const website = httpOrNull(raw.website);
+  const mc = raw.member_count ?? null;
   const domain = raw.domain?.trim() || (website ? canonicalDomain(website) : null);
   const os: NonNullable<RawLead["opportunity_score"]> = raw.opportunity_score ?? {};
   const comps: Partial<ScoreJson["components"]> = os.components ?? {};
@@ -81,46 +82,48 @@ export function mapLead(raw: RawLead, productId: string, today = localDate()): L
     domain,
     municipality: raw.municipality ?? null,
     sports: raw.sports ?? [],
-    member_count: raw.member_count ?? null,
+    member_count: mc ? { ...mc, source_url: httpOrNull(mc.source_url) } : null,
     signals: (raw.signals ?? []).map(
       (s): Signal => ({
         family: s.signal_family,
         type: s.signal_type,
         classification: s.classification,
         evidence_summary: s.evidence_summary,
-        source_url: s.source_url ?? null,
+        source_url: httpOrNull(s.source_url),
         source_published_date: s.source_published_date ?? null,
         discovered_date: s.discovered_date ?? null,
         confidence: s.confidence,
       }),
     ),
-    digital_stack: (raw.digital_stack ?? []).flatMap((d): StackEntry[] =>
-      d.source_url
+    digital_stack: (raw.digital_stack ?? []).flatMap((d): StackEntry[] => {
+      const url = httpOrNull(d.source_url);
+      return url
         ? [
             {
               system: d.system,
               category: d.category,
-              source_url: d.source_url,
+              source_url: url,
               classification: d.classification,
               observed_date: d.observed_date ?? null,
             },
           ]
-        : [],
-    ),
-    contacts: (raw.public_contact ?? []).flatMap((c): Contact[] =>
-      c.source_url
+        : [];
+    }),
+    contacts: (raw.public_contact ?? []).flatMap((c): Contact[] => {
+      const url = httpOrNull(c.source_url);
+      return url
         ? [
             {
               name: c.name ?? null,
               role: c.role ?? null,
               email: c.email ?? null,
               phone: c.phone ?? null,
-              source_url: c.source_url,
+              source_url: url,
               retrieved_date: c.retrieved_date ?? null,
             },
           ]
-        : [],
-    ),
+        : [];
+    }),
     // Recomputed with the rubric's rules (clamps, evidence URLs); the record's own total is not trusted.
     ...scoreLead(score),
     pain_hypothesis: raw.pain_hypothesis ?? null,
