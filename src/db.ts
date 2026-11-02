@@ -4,13 +4,16 @@ import { DATA_DIR, DB_PATH, SLOW_WINDOW_S, SOCIAL_WINDOW_S } from "./config.ts";
 
 export type Item = {
   id: string;
-  source: "reddit" | "hn" | "appstore" | "rss";
+  source: "reddit" | "hn" | "appstore" | "rss" | "bluesky";
   kind: "post" | "comment" | "review" | "article";
   url: string;
   title: string;
   body: string;
   author: string;
-  /** Channel label: subreddit, 'hn', competitor app name for reviews, query or feed name for articles. */
+  /**
+   * Channel label: subreddit, 'hn', search phrase for Bluesky posts, competitor app name for reviews,
+   * query or feed name for articles.
+   */
   subreddit: string;
   parent_id: string | null;
   created_at: number;

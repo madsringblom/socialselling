@@ -13,6 +13,11 @@ export const PRODUCTS_PATH = join(ROOT, "products.yaml");
 
 const Subreddit = z.string().regex(/^[A-Za-z0-9_]+$/, "subreddit without r/ prefix");
 const Country = z.string().regex(/^[a-z]{2}$/, "two-letter lowercase storefront code, e.g. dk");
+/** A Bluesky handle such as mads.bsky.social (a leading @ is dropped) or a did. */
+const BlueskyHandle = z
+  .string()
+  .transform((s) => s.replace(/^@/, "").toLowerCase())
+  .pipe(z.string().min(1));
 
 const CompetitorSchema = z.object({
   name: z.string().min(1),
@@ -50,11 +55,28 @@ const ProductSchema = z.object({
   non_english_subreddits: z.array(Subreddit).default([]),
   competitors: z.array(CompetitorSchema).default([]),
   news_queries: z.array(z.string().min(1)).default([]),
+  /**
+   * Bluesky search for this product's search_phrases. Danish phrases are searched with lang=da and allow
+   * non-English items through the prefilter; they also count as phrase hits in the prefilter.
+   */
+  bluesky: z
+    .object({
+      enabled: z.boolean().default(true),
+      danish_phrases: z.array(z.string().min(1)).default([]),
+    })
+    .default({ enabled: true, danish_phrases: [] }),
 });
 
 const ConfigSchema = z.object({
   products: z.array(ProductSchema).min(1),
   feeds: z.array(FeedSchema).nullish().transform((v) => v ?? []), // a "feeds:" key with only comments parses as null
+  /** own_handles: the owner's Bluesky accounts (handles or dids) whose posts are skipped. */
+  bluesky: z
+    .object({
+      enabled: z.boolean().default(true),
+      own_handles: z.array(BlueskyHandle).default([]),
+    })
+    .default({ enabled: true, own_handles: [] }),
 });
 
 export type Product = z.infer<typeof ProductSchema>;
