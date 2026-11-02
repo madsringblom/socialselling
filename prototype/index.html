@@ -3,11 +3,14 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap">
 <style>
 /*
-  Design plan: SocialSelling prototype
+  Design plan: SocialSelling prototype (v2)
   Layout: one calm work surface. Mobile: single column, sticky compact header (52px),
   fixed bottom nav with four tabs. Desktop (>=1024px): 200px left rail; Today and Pipeline
   use a 360px list column plus a detail column (flex 1, max 720px); Intel and Setup are a
   single column, max 760px.
+  Each screen answers one question. Today is a capped queue (max 5) that empties: every item
+  ends in act / skip / later. Artifacts (draft, call brief, idea) first; scores and signals
+  sit in collapsed details.
   Color: quiet grey-green neutrals and one sea-teal accent. Semantic good / warn / crit are
   kept separate from the accent. Classification: HOT = crit, STRONG = accent,
   WATCH = warn, ARCHIVE = muted.
@@ -32,6 +35,7 @@
   --warn-soft: #FBF0DF;
   --crit: #B23B3B;
   --crit-soft: #F9E5E4;
+  --scrim: rgb(23 32 31 / .45);
 
   --font-ui: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: "Fraunces", Georgia, serif;
@@ -61,6 +65,7 @@
     --warn-soft: #3A2D14;
     --crit: #E07070;
     --crit-soft: #3D2121;
+    --scrim: rgb(0 0 0 / .6);
     color-scheme: dark;
   }
 }
@@ -80,6 +85,7 @@
   --warn-soft: #3A2D14;
   --crit: #E07070;
   --crit-soft: #3D2121;
+  --scrim: rgb(0 0 0 / .6);
   color-scheme: dark;
 }
 
@@ -100,10 +106,12 @@ ul { padding: 0; list-style: none; }
 button, input, textarea { font: inherit; color: inherit; }
 a { color: var(--accent); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[tabindex="-1"]:not(button):focus { outline: none; }
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
+.no-scroll { overflow: hidden; }
 
 /* Shell */
 .app {
@@ -208,7 +216,7 @@ a { color: var(--accent); }
   gap: 2px;
 }
 .header-date { font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
-.header-layout {
+.header-actions {
   order: 3;
   flex: 1 0 100%;
   min-width: 0;
@@ -313,6 +321,8 @@ a { color: var(--accent); }
 .score-box { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .score { font-size: 20px; font-weight: 600; line-height: 1; color: var(--fg); }
 .score-big { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 26px; font-weight: 600; line-height: 1; }
+/* Lifts a control above the full-card click target */
+.lift { position: relative; z-index: 2; }
 
 .inset {
   display: flex;
@@ -327,7 +337,6 @@ a { color: var(--accent); }
 
 .detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .detail-title { font-size: 20px; font-weight: 600; line-height: 1.3; }
-.detail-title:focus { outline: none; }
 .display { font-family: var(--font-display); font-weight: 500; }
 
 /* Rows inside cards */
@@ -342,21 +351,12 @@ a { color: var(--accent); }
 }
 :where(.row):first-child { border-top: 0; padding-top: 0; }
 :where(.row):last-child { padding-bottom: 0; }
-.row-focus {
-  padding-block: 12px;
-  padding-inline: 8px;
-  margin-inline: -8px;
-  background: var(--accent-soft);
-  border-radius: var(--radius);
-}
 .brief { display: grid; gap: 8px; padding-left: 20px; list-style: disc; }
 
 /* Bars */
 .bar-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) 48px; gap: 12px; align-items: center; }
 .bar { display: block; height: 8px; background: var(--surface-2); border-radius: var(--radius-pill); overflow: hidden; }
 .bar-fill { display: block; height: 100%; background: var(--accent); border-radius: var(--radius-pill); }
-.dist { display: flex; flex-direction: column; gap: 4px; }
-.dist-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) 24px; gap: 8px; align-items: center; }
 
 /* Stars */
 .stars { white-space: nowrap; letter-spacing: 1px; }
@@ -444,25 +444,18 @@ a { color: var(--accent); }
 .pill:where(:hover) { border-color: var(--fg-muted); }
 .pill[aria-pressed="true"], .pill[aria-checked="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
-/* Segmented control */
-.seg { display: inline-flex; gap: 2px; padding: 1px; background: var(--surface-2); border-radius: var(--radius-pill); }
-.seg-btn {
+/* Skip chooser: in-card reasons */
+.skip {
   position: relative;
-  min-height: 38px;
-  min-width: 44px;
-  padding: 0 14px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--fg-muted);
-  font-size: 14px;
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  cursor: default;
 }
-.seg-btn::before { content: ""; position: absolute; top: -4px; bottom: -4px; left: 0; right: 0; }
-.seg-btn:where(:hover) { color: var(--fg); }
-.seg-btn[aria-pressed="true"] { background: var(--surface); border-color: var(--line); color: var(--fg); }
 
 /* Switch */
 .switch {
@@ -509,6 +502,30 @@ a { color: var(--accent); }
 .field-area { resize: vertical; }
 .input-row { display: flex; align-items: stretch; gap: 8px; min-width: 0; }
 
+/* Disclosure: native details with a 44px summary row */
+.disclosures { gap: 0; padding-block: 4px; }
+.disclosure { min-width: 0; }
+.disclosure + .disclosure { border-top: 1px solid var(--line); }
+.disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  list-style: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary:where(:hover) .eyebrow { color: var(--fg); }
+.chev { color: var(--fg-muted); transition: transform .15s ease; }
+.disclosure[open] > summary .chev { transform: rotate(180deg); }
+.disclosure-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 4px 0 16px; }
+
+/* Empty state */
+.empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding-block: 32px; text-align: center; }
+.empty-title { font-size: 26px; font-weight: 500; line-height: 1.2; }
+
 /* Tables */
 .table { width: 100%; border-collapse: collapse; }
 .table-fixed { table-layout: fixed; }
@@ -543,8 +560,45 @@ a { color: var(--accent); }
 }
 .toast-on { opacity: 1; transform: none; }
 
+/* Dialog */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: max(16px, env(safe-area-inset-top, 0px));
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: var(--scrim);
+}
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 100%;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.dialog-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.picks { display: flex; flex-direction: column; min-width: 0; }
+.picks > li + li { border-top: 1px solid var(--line); }
+.pick { display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 44px; padding-block: 8px; cursor: pointer; }
+.pick input { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--accent); cursor: inherit; }
+.pick:has(input:disabled) { cursor: default; }
+.error { font-size: 13px; color: var(--crit); }
+
 @media (min-width: 640px) {
   .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dialog { padding: 24px; }
 }
 
 @media (min-width: 1024px) {
@@ -591,7 +645,7 @@ a { color: var(--accent); }
   .nav-btn::before { top: 10px; bottom: 10px; left: 0; right: auto; width: 2px; height: auto; }
   .header { clip-path: inset(-100vmax -100vmax 0 -24px); }
   .page-title { font-size: 26px; }
-  .header-layout { order: 2; flex: none; padding-bottom: 0; }
+  .header-actions { order: 2; flex: none; padding-bottom: 0; }
   .header-meta { order: 3; flex-direction: row; align-items: center; gap: 12px; }
   .split { display: grid; grid-template-columns: 360px minmax(0, 720px); gap: 24px; align-items: start; }
   .toast-region { bottom: 24px; }
@@ -631,12 +685,16 @@ a { color: var(--accent); }
   <div class="toast-region" role="status" aria-live="polite">
     <div class="toast" id="toast" hidden></div>
   </div>
+
+  <div class="scrim" id="dialog" hidden>
+    <div class="dialog" id="dialog-panel" role="dialog" aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-desc"></div>
+  </div>
 </div>
 
 <script>
 const DATA = {
-  run: { label: 'Sun 2 Nov · run 07:00' },
-  funnel: { fetched: 73, bySource: 'hn 57, bluesky 9, appstore 6, rss 1', signals: 9, actions: 7, cost: '$0.02' },
+  run: { label: 'Sun 2 Nov · run 07:00', week: 45, next: 'tomorrow 07:00', hoursToNoon: 5 },
+  funnel: { fetched: 73, bySource: 'hn 57 · bluesky 9 · appstore 6 · rss 1', signals: 9, actions: 5, cost: '$0.02' },
 
   products: {
     mio: {
@@ -645,7 +703,7 @@ const DATA = {
       phrases: 14, competitors: 2, queries: 6,
     },
     'sales-habit': {
-      name: 'Sales Habit',
+      name: 'Salgsro',
       oneLiner: 'A 20-minute daily sales routine for freelancers and solo consultants.',
       phrases: 11, competitors: 0, queries: 0,
     },
@@ -659,10 +717,11 @@ const DATA = {
       title: 'Looking for a simple CRM as a freelancer, HubSpot is overkill',
       text: "I'm a solo web designer. I keep forgetting to follow up with leads and they go cold. HubSpot is way too complicated for one person. Is there a simple tool that just tells me who to chase today? Not looking for enterprise stuff.",
       lang: 'en', tier: 'asking_for_tool', confidence: 0.91, flags: [], expiresH: 9,
+      reason: 'Solo freelancer explicitly asking for a simpler follow-up tool than HubSpot.',
       drafts: {
-        default: "The thing that fixed this for me wasn't a CRM, it was a daily list. Every morning: who owes me a reply, who I owe one, who went quiet. 20 minutes, then back to client work. I built a small app around that routine (Sales Habit) because spreadsheets kept dying on me, but honestly the habit matters more than the tool. Happy to share how I set up the list if useful.",
+        default: "The thing that fixed this for me wasn't a CRM, it was a daily list. Every morning: who owes me a reply, who I owe one, who went quiet. 20 minutes, then back to client work. I built a small app around that routine (Salgsro) because spreadsheets kept dying on me, but honestly the habit matters more than the tool. Happy to share how I set up the list if useful.",
         nolink: "The thing that fixed this for me wasn't a CRM, it was a daily list. Every morning: who owes me a reply, who I owe one, who went quiet. 20 minutes, then back to client work. I ended up building my own little tool around that routine because spreadsheets kept dying on me, but honestly the habit matters more than the tool. Happy to share how I set up the list if useful.",
-        redraft: "Skip the CRM. Keep one list: who owes you a reply, who you owe, who went quiet. Work it 20 minutes every morning before client work. I built Sales Habit around exactly that routine because I kept dropping the ball otherwise. Ask me anything about the setup.",
+        redraft: "Skip the CRM. Keep one list: who owes you a reply, who you owe, who went quiet. Work it 20 minutes every morning before client work. I built Salgsro around exactly that routine because I kept dropping the ball otherwise. Ask me anything about the setup.",
       },
     },
     {
@@ -672,10 +731,11 @@ const DATA = {
       title: 'Ask HN: How do you keep selling while delivering client work?',
       text: "Every time I land a big project my pipeline is empty three months later. I only do sales when I'm desperate. Solo consultant, 8 years in. How do you stay consistent with business development when you're busy?",
       lang: 'en', tier: 'describing_problem', confidence: 0.84, flags: [], expiresH: 5,
+      reason: 'First-person feast-or-famine pain, the exact routine Salgsro sells.',
       drafts: {
         default: "Feast or famine is a scheduling problem more than a sales problem. The fix that stuck for me: a fixed 20-minute slot every day, before client work, where the only job is follow-ups and one new conversation. Not more selling, just never zero. Streaks help more than I expected. I ended up building a small tool for the routine, but a recurring calendar block and a list of names gets you 80% there.",
         nolink: "Feast or famine is a scheduling problem more than a sales problem. The fix that stuck for me: a fixed 20-minute slot every day, before client work, where the only job is follow-ups and one new conversation. Not more selling, just never zero. Streaks help more than I expected. I ended up building a small tool for the routine, but a recurring calendar block and a list of names gets you 80% there.",
-        redraft: "Make selling a daily 20-minute habit instead of a quarterly panic. Fixed slot, before client work, follow-ups first. The pipeline stops going to zero within a month. I built Sales Habit around that routine after my third famine.",
+        redraft: "Make selling a daily 20-minute habit instead of a quarterly panic. Fixed slot, before client work, follow-ups first. The pipeline stops going to zero within a month. I built Salgsro around that routine after my third famine.",
       },
     },
     {
@@ -685,6 +745,7 @@ const DATA = {
       title: 'Nogen der kender et godt system til vagter i vores klub?',
       text: 'Vi er en lille håndboldklub og vagtplanen for cafeteriet kører i et Excel-ark som ingen opdaterer. Er der en app til det? Vi har kigget på Holdsport men det virker tungt.',
       lang: 'da', tier: 'asking_for_tool', confidence: 0.88, flags: ['Danish', 'Mentions Holdsport'], expiresH: 1,
+      reason: 'Club asking for a shift-plan app and naming Holdsport as too heavy.',
       drafts: {
         default: 'Excel-arket kender jeg alt for godt. Det der virkede for os: en vagtplan hvor folk selv tager vagter fra telefonen, og en påmindelse dagen før. Så forsvinder de fleste huller af sig selv. Vi har bygget det ind i Mio (hejmio.dk), som er lavet til klubber som jeres, men skriv endelig hvis I vil høre hvordan vi har sat det op uanset hvad I vælger.',
         nolink: 'Excel-arket kender jeg alt for godt. Det der virkede for os: en vagtplan hvor folk selv tager vagter fra telefonen, og en påmindelse dagen før. Så forsvinder de fleste huller af sig selv. Vi har selv bygget en lille løsning til det, men skriv endelig hvis I vil høre hvordan vi har sat det op uanset hvad I vælger.',
@@ -815,7 +876,7 @@ const DATA = {
     { id: 'i6', comp: 'holdsport', product: 'mio', store: 'dk', lang: 'da', stars: 4, ageD: 15, title: 'God app til Fodbold!', text: 'Vi bruger den til vores Old Boys hold hver uge, og den har ikke svigtet en eneste gang.', insight: 'Reliable week after week for an Old Boys team', kind: 'praise' },
   ],
 
-  today: { leads: ['l1', 'l2'], intel: ['i1', 'i4'] },
+  today: { leads: ['l1', 'l2'], newGaps: 2 },
 
   ideas: [
     { id: 'idea1', text: 'Comparison page: find any post or message again, Mio vs Spond', from: 'Spond has no global search' },
@@ -849,58 +910,47 @@ const DATA = {
 const index = arr => Object.fromEntries(arr.map(x => [x.id, x]));
 const REPLY = index(DATA.replies);
 const LEAD = index(DATA.leads);
-const REVIEW = index(DATA.reviews);
 const COMP = index(DATA.competitors);
 const SOURCE = index(DATA.sources);
 
 const TABS = ['today', 'pipeline', 'intel', 'setup'];
 const TITLES = { today: 'Today', pipeline: 'Pipeline', intel: 'Competitor intel', setup: 'Setup' };
-const VARIANTS = { A: 'Grouped by play', B: 'One feed', C: 'By product' };
+const TODAY_CAP = 5;
 const TIERS = { asking_for_tool: 'Asking for a tool', describing_problem: 'Describing a problem' };
 const STATUSES = [['new', 'New'], ['contacted', 'Contacted'], ['replied', 'Replied'], ['meeting', 'Meeting'], ['no-interest', 'No interest']];
 const STATUS_LABEL = Object.fromEntries(STATUSES);
+const SKIP_REASONS = [['not-user', 'Not my user'], ['answered', 'Already answered'], ['wrong-product', 'Wrong product'], ['later', 'Not now']];
 const CLASS_CHIP = { HOT: 'chip-hot', STRONG: 'chip-strong', WATCH: 'chip-watch', ARCHIVE: 'chip-archive' };
 const TAG_CLASS = { FACT: 'tag-fact', INFERENCE: 'tag-inference', HYPOTHESIS: 'tag-hypothesis' };
 const PLAYS = { reply: 'Reply drafts', lead: 'Lead research', intel: 'Competitor intel' };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const STORE_KEY = 'socialselling-prototype';
+const SALGSRO_URL = 'https://salgsro.dk/leads/';
 const ICON_CLOCK = '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>';
+const ICON_CHEVRON = '<svg class="icon-sm chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
 
 /* ---------- State ---------- */
 const state = {
   tab: null,
-  variant: 'A',
-  feedFilter: 'all',
-  product: 'mio',
   sel: { today: null, pipeline: null },
   detailOpen: false,
   leadFilter: 'all',
   statusFilter: 'all',
-  intelFocus: null,
+  queue: {},        // Today item id -> 'skipped' | 'later'
+  skipReason: {},   // Today item id -> reason key (feeds the filter)
+  skipOpen: null,   // open skip chooser: 'card:<id>' | 'detail:<id>'
+  open: {},         // <details> open state by data-key
   reply: {},
   lead: {},
-  ideas: {},
+  ideas: {},        // idea id -> 'saved' | 'dismissed'
   sources: {},
   plays: JSON.parse(JSON.stringify(DATA.plays)),
+  dialog: { open: false, busy: false, picks: {}, trigger: null },
 };
 DATA.replies.forEach(r => {
   state.reply[r.id] = { variant: 'default', text: r.drafts.default, rating: null, posted: false, undoTimer: null, direction: '' };
 });
-DATA.leads.forEach(l => { state.lead[l.id] = { status: l.status, note: '', showAll: false }; });
+DATA.leads.forEach(l => { state.lead[l.id] = { status: l.status, note: '', showAll: false, inSalgsro: false }; });
 DATA.sources.forEach(s => { state.sources[s.id] = s.status; });
-
-try {
-  const saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
-  if (VARIANTS[saved.variant]) state.variant = saved.variant;
-  if (['all', 'reply', 'lead', 'intel'].includes(saved.feedFilter)) state.feedFilter = saved.feedFilter;
-  if (DATA.products[saved.product]) state.product = saved.product;
-} catch (e) { /* storage unavailable */ }
-
-function persist() {
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ variant: state.variant, feedFilter: state.feedFilter, product: state.product }));
-  } catch (e) { /* storage unavailable */ }
-}
 
 /* ---------- Helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -908,6 +958,7 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&a
 const langAttr = lang => (lang && lang !== 'en' ? ` lang="${lang}"` : '');
 const prodName = id => DATA.products[id].name;
 const countLabel = text => `${text.length} characters`;
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const mq = window.matchMedia('(min-width: 1024px)');
 const isDesk = () => mq.matches;
 
@@ -932,6 +983,12 @@ function leadMeta(l, short) {
   const sports = short && l.sports.length > 2 ? `${l.sports.slice(0, 2).join(', ')} +${l.sports.length - 2}` : l.sports.join(', ');
   return `${l.kommune} · ${sports} · ${l.members ? `${l.members} members` : 'members unknown'}`;
 }
+function disclosure(key, label, body) {
+  return `<details class="disclosure" data-key="${key}"${state.open[key] ? ' open' : ''}>
+  <summary><span class="eyebrow">${label}</span>${ICON_CHEVRON}</summary>
+  <div class="disclosure-body">${body}</div>
+</details>`;
+}
 
 /* Focus keeping across re-renders: controls are identified by data-action + data-arg. */
 function keyOf(el) {
@@ -939,9 +996,10 @@ function keyOf(el) {
   return `[data-action="${el.dataset.action}"][data-arg="${(el.dataset.arg || '').replace(/"/g, '\\"')}"]`;
 }
 function restore(selector) {
-  if (!selector) return;
+  if (!selector) return false;
   const el = document.querySelector(selector);
   if (el) el.focus({ preventScroll: true });
+  return !!el;
 }
 function keep(fn) {
   const key = keyOf(document.activeElement);
@@ -985,27 +1043,69 @@ async function copyText(text, el) {
   }
 }
 
-/* ---------- Today data ---------- */
-function todayItems() {
-  return [
-    ...DATA.replies.map(r => ({ kind: 'reply', id: r.id, product: r.product, ageH: r.ageH })),
-    ...DATA.today.leads.map(id => ({ kind: 'lead', id, product: LEAD[id].product, ageH: LEAD[id].foundH })),
-    ...DATA.today.intel.map(id => ({ kind: 'intel', id, product: REVIEW[id].product, ageH: REVIEW[id].ageD * 24 })),
-  ];
+/* ---------- Today queue ---------- */
+const TODAY_ALL = [
+  ...DATA.replies.map(r => ({ kind: 'reply', id: r.id })),
+  ...DATA.today.leads.map(id => ({ kind: 'lead', id })),
+];
+
+/* Acted on: posted (after the undo window), or a lead that got a status or went to Salgsro. */
+function isHandled(item) {
+  if (item.kind === 'reply') {
+    const s = state.reply[item.id];
+    return s.posted && !s.undoTimer;
+  }
+  const s = state.lead[item.id];
+  return s.status !== 'new' || s.inSalgsro;
+}
+
+/* open: what is left to do (capped). shown: open plus the selected item, so an item you just
+   acted on does not vanish from under you; it leaves when you move on. */
+function todayQueue(keepId) {
+  const open = TODAY_ALL.filter(i => !state.queue[i.id] && !isHandled(i)).slice(0, TODAY_CAP);
+  const openIds = open.map(i => i.id);
+  const shown = TODAY_ALL.filter(i => openIds.includes(i.id) || (i.id === keepId && !state.queue[i.id]));
+  const later = TODAY_ALL.filter(i => state.queue[i.id] === 'later' && (!isHandled(i) || i.id === keepId));
+  return { open, shown, later };
+}
+
+/* ---------- Skip ---------- */
+function skipButton(where, id, label, lang) {
+  const key = `${where}:${id}`;
+  return `<button type="button" class="btn btn-ghost lift" data-action="skip" data-arg="${key}" aria-expanded="${state.skipOpen === key}" aria-controls="skip-${where}-${id}">Skip${label ? `<span class="sr-only"${langAttr(lang)}>: ${esc(label)}</span>` : ''}</button>`;
+}
+
+function skipChooser(where, id) {
+  const key = `${where}:${id}`;
+  return `<div class="skip" id="skip-${where}-${id}" role="group" aria-labelledby="skip-label-${where}-${id}"${state.skipOpen === key ? '' : ' hidden'}>
+  <p class="meta" id="skip-label-${where}-${id}">Why skip this?</p>
+  <div class="pill-row">${SKIP_REASONS.map(([v, l]) => `<button type="button" class="pill" data-action="skip-reason" data-arg="${key}:${v}">${l}</button>`).join('')}<button type="button" class="btn btn-text" data-action="skip-cancel" data-arg="${key}">Cancel</button></div>
+</div>`;
+}
+
+function showSkip(key, open) {
+  const box = $(`skip-${key.replace(':', '-')}`);
+  if (box) box.hidden = !open;
+  const btn = document.querySelector(`[data-action="skip"][data-arg="${key}"]`);
+  if (btn) btn.setAttribute('aria-expanded', String(open));
+}
+
+function setSkip(key, open) {
+  if (state.skipOpen && state.skipOpen !== key) showSkip(state.skipOpen, false);
+  state.skipOpen = open ? key : null;
+  showSkip(key, open);
 }
 
 /* ---------- Cards ---------- */
 function replyCard(r, o) {
   const s = state.reply[r.id];
   const sel = o.selected === r.id;
-  const expires = r.expiresH <= 6
-    ? `<span class="meta inline-icon${r.expiresH <= 2 ? ' text-warn' : ''}">${ICON_CLOCK}expires in ${r.expiresH}h</span>`
-    : '';
   return `<article class="card card-click${sel ? ' is-selected' : ''}">
-  <div class="card-row meta">${o.feed ? '<span class="chip">Reply</span>' : ''}<span>${esc(r.source)} · ${r.ageH}h ago</span><span class="chip chip-accent">${esc(prodName(r.product))}</span>${s.posted ? '<span class="chip"><span aria-hidden="true">✓</span> Posted</span>' : ''}</div>
+  <div class="card-row meta"><span>${esc(r.source)} · ${r.ageH}h ago</span><span class="inline-icon${r.expiresH <= 2 ? ' text-warn' : ''}">${ICON_CLOCK}expires in ${r.expiresH}h</span><span class="chip chip-accent">${esc(prodName(r.product))}</span>${s.posted ? '<span class="chip"><span aria-hidden="true">✓</span> Posted</span>' : ''}</div>
   <h3 class="card-title"><button type="button" class="card-hit" data-action="open" data-arg="${r.id}"${sel ? ' aria-current="true"' : ''}><span class="clamp-2"${langAttr(r.lang)}>${esc(r.title)}</span></button></h3>
   <p class="meta line-1"${langAttr(r.lang)}>${esc(r.text)}</p>
-  <div class="card-foot"><div class="card-row"><span class="chip">${TIERS[r.tier]}</span>${expires}</div><span class="btn btn-ghost" aria-hidden="true">Open draft</span></div>
+  <div class="card-foot"><span class="chip">${TIERS[r.tier]}</span><div class="card-row">${o.noSkip ? '' : skipButton('card', r.id, r.title, r.lang)}<span class="btn btn-ghost" aria-hidden="true">Open draft</span></div></div>
+  ${o.noSkip ? '' : skipChooser('card', r.id)}
 </article>`;
 }
 
@@ -1013,8 +1113,11 @@ function leadCard(l, o) {
   const s = state.lead[l.id];
   const sel = o.selected === l.id;
   const showStatus = o.showStatus || s.status !== 'new';
+  const foot = o.today
+    ? `<div class="card-foot"><span class="meta">${l.foundH < 24 ? 'found today' : `found ${Math.floor(l.foundH / 24)}d ago`}</span><div class="card-row">${o.noSkip ? '' : skipButton('card', l.id, l.name)}<span class="btn btn-ghost" aria-hidden="true">Open lead</span></div></div>
+  ${o.noSkip ? '' : skipChooser('card', l.id)}`
+    : '';
   return `<article class="card card-click${sel ? ' is-selected' : ''}">
-  ${o.feed ? '<div class="card-row meta"><span class="chip">Lead</span><span>found today</span></div>' : ''}
   <div class="lead-top">
     <div class="stack-4">
       <h3 class="card-title"><button type="button" class="card-hit" data-action="open" data-arg="${l.id}"${sel ? ' aria-current="true"' : ''}>${esc(l.name)}</button></h3>
@@ -1022,24 +1125,14 @@ function leadCard(l, o) {
     </div>
     <div class="score-box"><span class="score mono"><span class="sr-only">Score </span>${l.score}</span><span class="chip ${CLASS_CHIP[l.cls]}">${l.cls}</span></div>
   </div>
-  <div class="card-line">${showStatus ? statusChip(s.status) : ''}<p class="meta line-1">${esc(l.topSignal)}</p></div>
-</article>`;
-}
-
-function intelCard(v, o) {
-  const c = COMP[v.comp];
-  return `<article class="card card-click">
-  ${o.feed ? '<div class="card-row meta"><span class="chip">Intel</span><span>App Store</span></div>' : ''}
-  <div class="card-row"><h3 class="card-title"><button type="button" class="card-hit" data-action="open-intel" data-arg="${v.id}">${esc(c.name)}<span class="sr-only">: ${esc(v.insight)}</span></button></h3>${stars(v.stars)}<span class="chip">${v.store}</span><span class="meta">${v.ageD}d ago</span></div>
-  <p class="line-1">${esc(v.insight)}</p>
-  <p class="meta">review</p>
+  <div class="card-line">${showStatus ? statusChip(s.status) : ''}${s.inSalgsro ? '<span class="chip">In Salgsro</span>' : ''}<p class="meta line-1">${esc(l.topSignal)}</p></div>
+  ${foot}
 </article>`;
 }
 
 function cardFor(item, o) {
-  if (item.kind === 'reply') return replyCard(REPLY[item.id], o);
-  if (item.kind === 'lead') return leadCard(LEAD[item.id], o);
-  return intelCard(REVIEW[item.id], o);
+  const opts = { ...o, noSkip: o.later || isHandled(item) };
+  return item.kind === 'reply' ? replyCard(REPLY[item.id], opts) : leadCard(LEAD[item.id], opts);
 }
 
 /* ---------- Today list ---------- */
@@ -1054,57 +1147,53 @@ function section(key, title, items, o, viewAll) {
 </section>`;
 }
 
-function grouped(items, o) {
-  const replies = items.filter(i => i.kind === 'reply');
-  const leads = items.filter(i => i.kind === 'lead');
-  const intel = items.filter(i => i.kind === 'intel');
-  const newLeads = leads.filter(i => state.lead[i.id].status === 'new').length;
-  return section('replies', `Reply drafts (${replies.length})`, replies, o)
-    + section('leads', `Leads (${newLeads} new)`, leads, o, { tab: 'pipeline', label: 'View all leads in Pipeline' })
-    + section('intel', `Competitor intel (${intel.length})`, intel, o, { tab: 'intel', label: 'View all competitor intel' });
-}
-
 function todayList(selected) {
-  const items = todayItems();
-  const o = { selected };
-  if (state.variant === 'B') {
-    const filters = [['all', 'All'], ['reply', 'Replies'], ['lead', 'Leads'], ['intel', 'Intel']];
-    const list = items
-      .filter(i => state.feedFilter === 'all' || i.kind === state.feedFilter)
-      .sort((a, b) => a.ageH - b.ageH);
-    return `<div class="pill-row" role="group" aria-label="Filter feed">${filters.map(([v, l]) => pill('feed', v, l, state.feedFilter === v)).join('')}</div>
-<div class="cards">${list.map(i => cardFor(i, { ...o, feed: true })).join('')}</div>`;
+  const { open, shown, later } = todayQueue(selected);
+  const o = { selected, today: true };
+  const intel = `<p class="meta">Competitor intel: <span class="mono">${DATA.today.newGaps}</span> new gaps this week <a class="link" href="#intel"><span aria-hidden="true">→ </span>Intel</a></p>`;
+  const laterHtml = later.length
+    ? disclosure('later', `Later (${later.length})`, `<div class="cards">${later.map(i => cardFor(i, { ...o, later: true })).join('')}</div>`)
+    : '';
+
+  if (!open.length) {
+    return `<div class="empty"><h2 class="empty-title display" id="today-done" tabindex="-1">Done for today.</h2><p class="meta">Next run ${esc(DATA.run.next)}.</p></div>
+${laterHtml}${intel}`;
   }
-  if (state.variant === 'C') {
-    const seg = Object.keys(DATA.products).map(p => {
-      const n = items.filter(i => i.product === p).length;
-      return `<button type="button" class="seg-btn" aria-pressed="${state.product === p}" data-action="product" data-arg="${p}">${esc(prodName(p))} (${n})</button>`;
-    }).join('');
-    const body = grouped(items.filter(i => i.product === state.product), o);
-    return `<div><div class="seg" role="group" aria-label="Product">${seg}</div></div>
-${body || `<p class="meta">Nothing for ${esc(prodName(state.product))} today.</p>`}`;
-  }
-  return grouped(items, o);
+
+  const soon = open.filter(i => i.kind === 'reply' && REPLY[i.id].expiresH <= DATA.run.hoursToNoon).length;
+  const count = `<p class="meta" id="today-count" tabindex="-1"><span class="mono">${open.length}</span> ${open.length === 1 ? 'thing' : 'things'}${soon ? ` · <span class="mono">${soon}</span> ${soon === 1 ? 'expires' : 'expire'} before noon` : ''}</p>`;
+  const replies = shown.filter(i => i.kind === 'reply');
+  const leads = shown.filter(i => i.kind === 'lead');
+  return count
+    + section('replies', `Reply drafts (${replies.length})`, replies, o)
+    + section('leads', `New leads (${leads.length})`, leads, o, { tab: 'pipeline', label: 'View all leads in Pipeline' })
+    + laterHtml
+    + intel;
 }
 
 /* ---------- Pipeline list ---------- */
 function filteredLeads() {
   return DATA.leads
     .filter(l => state.leadFilter === 'all' || l.cls === state.leadFilter)
-    .filter(l => state.statusFilter === 'all' || state.lead[l.id].status === state.statusFilter)
+    .filter(l => {
+      const s = state.lead[l.id];
+      if (state.statusFilter === 'all') return true;
+      if (state.statusFilter === 'salgsro') return s.inSalgsro;
+      return s.status === state.statusFilter;
+    })
     .sort((a, b) => b.score - a.score);
 }
 
 function pipelineList(selected) {
   const leads = filteredLeads();
   const classes = [['all', 'All'], ['HOT', 'HOT'], ['STRONG', 'STRONG'], ['WATCH', 'WATCH']];
-  const statuses = [['all', 'All statuses'], ...STATUSES];
+  const statuses = [['all', 'All statuses'], ...STATUSES, ['salgsro', 'In Salgsro']];
   return `<div class="stack-8">
   <div class="pill-row" role="group" aria-label="Filter by class">${classes.map(([v, l]) => pill('lead-filter', v, l, state.leadFilter === v)).join('')}</div>
   <div class="pill-row" role="group" aria-label="Filter by status">${statuses.map(([v, l]) => pill('status-filter', v, l, state.statusFilter === v)).join('')}</div>
 </div>
 ${leads.length
-    ? `<section class="section" aria-labelledby="sec-leads"><h2 class="eyebrow" id="sec-leads">${leads.length} ${leads.length === 1 ? 'lead' : 'leads'} · by score</h2><div class="cards">${leads.map(l => leadCard(l, { selected, showStatus: true })).join('')}</div></section>`
+    ? `<section class="section" aria-labelledby="sec-leads"><h2 class="eyebrow" id="sec-leads">${plural(leads.length, 'lead', 'leads')} · by score</h2><div class="cards">${leads.map(l => leadCard(l, { selected, showStatus: true })).join('')}</div></section>`
     : '<p class="meta">No leads match these filters.</p>'}`;
 }
 
@@ -1132,6 +1221,7 @@ function replyDetail(r) {
     <blockquote class="quote"${langAttr(r.lang)}>${esc(r.text)}</blockquote>
     <div class="card-row meta">${r.flags.map(f => `<span class="chip">${esc(f)}</span>`).join('')}<span class="mono">confidence ${r.confidence.toFixed(2)}</span><span class="inline-icon${r.expiresH <= 2 ? ' text-warn' : ''}">${ICON_CLOCK}expires in ${r.expiresH}h</span></div>
   </div>
+  <p class="meta">Why this post: ${esc(r.reason)}</p>
 
   <section class="card">
     <label class="eyebrow" for="draft-${id}">Draft</label>
@@ -1161,7 +1251,9 @@ function replyDetail(r) {
   <div class="card-row">
     <button type="button" class="btn btn-primary" data-action="copy-draft" data-arg="${id}">Copy draft</button>
     <button type="button" class="btn" id="post-${id}" data-action="post" data-arg="${id}"${final ? ' aria-disabled="true"' : ''}>${postButtonInner(s)}</button>
+    ${skipButton('detail', id)}
   </div>
+  ${skipChooser('detail', id)}
   <p class="meta">You post it yourself. Nothing is sent automatically.</p>
 </div>`;
 }
@@ -1209,6 +1301,18 @@ function signalsHtml(l) {
   return `<ul class="rows" id="sig-list-${l.id}">${list.map(signalRow).join('')}</ul>${more}`;
 }
 
+function salgsroHtml(l) {
+  if (!state.lead[l.id].inSalgsro) {
+    return `<button type="button" class="btn btn-ghost" data-action="add-lead" data-arg="${l.id}">Add to Salgsro</button>`;
+  }
+  return `<span class="chip">In Salgsro</span><a class="btn btn-ghost" id="salgsro-link-${l.id}" href="${SALGSRO_URL}${l.id}" target="_blank" rel="noopener noreferrer">Open in Salgsro<span aria-hidden="true">&nbsp;↗</span><span class="sr-only"> (opens in a new tab)</span></a>`;
+}
+
+function syncSalgsro(id) {
+  const el = $(`salgsro-${id}`);
+  if (el) el.innerHTML = salgsroHtml(LEAD[id]);
+}
+
 function leadDetail(l) {
   const s = state.lead[l.id];
   const id = l.id;
@@ -1243,30 +1347,10 @@ function leadDetail(l) {
     <h2 class="detail-title display" id="detail-title" tabindex="-1">${esc(l.name)}</h2>
     <p class="meta">${esc(l.kommune)} · ${esc(l.sports.join(', '))} · ${members}</p>
     <div class="card-row"><span class="chip ${CLASS_CHIP[l.cls]}">${l.cls}</span><span class="score-big"><span class="sr-only">Score </span>${l.score}<span class="meta"> / 100</span></span></div>
+    <div class="card-row" id="salgsro-${id}">${salgsroHtml(l)}</div>
   </div>
 
-  <section class="card" aria-labelledby="h-score-${id}">
-    <h3 class="eyebrow" id="h-score-${id}">Score breakdown</h3>
-    ${bars}
-    ${adj}
-  </section>
-
   <section class="card">${brief}</section>
-
-  <section class="card" aria-labelledby="h-sig-${id}">
-    <h3 class="eyebrow" id="h-sig-${id}">Signals (${l.signals.length})</h3>
-    <div class="stack-8" id="signals-${id}">${signalsHtml(l)}</div>
-  </section>
-
-  <section class="card" aria-labelledby="h-stack-${id}">
-    <h3 class="eyebrow" id="h-stack-${id}">Digital stack</h3>
-    <div class="card-row">${l.stack.map(x => `<span class="chip">${esc(x)}</span>`).join('')}</div>
-  </section>
-
-  <section class="card" aria-labelledby="h-contacts-${id}">
-    <div class="stack-4"><h3 class="eyebrow" id="h-contacts-${id}">Contacts</h3><p class="meta">Only contact details the club publishes itself.</p></div>
-    <ul class="rows">${contacts}</ul>
-  </section>
 
   <section class="card">
     <h3 class="eyebrow" id="status-label-${id}">Pipeline</h3>
@@ -1276,6 +1360,13 @@ function leadDetail(l) {
     <textarea class="field field-area" id="fb-${id}" rows="3" placeholder="What happened? e.g. called, call back in January" data-input="note" data-arg="${id}">${esc(s.note)}</textarea>
     <div><button type="button" class="btn btn-ghost" data-action="save-note" data-arg="${id}">Save note</button></div>
   </section>
+
+  <div class="card disclosures">
+    ${disclosure(`${id}-score`, 'Score breakdown', bars + adj)}
+    ${disclosure(`${id}-signals`, `Signals (${l.signals.length})`, `<div class="stack-8" id="signals-${id}">${signalsHtml(l)}</div>`)}
+    ${disclosure(`${id}-stack`, 'Digital stack', `<div class="card-row">${l.stack.map(x => `<span class="chip">${esc(x)}</span>`).join('')}</div>`)}
+    ${disclosure(`${id}-contacts`, `Contacts (${l.contacts.length})`, `<p class="meta">Only contact details the club publishes itself.</p><ul class="rows">${contacts}</ul>`)}
+  </div>
 </div>`;
 }
 
@@ -1288,25 +1379,63 @@ function syncStatus(id) {
   });
 }
 
+/* ---------- Add-to-Salgsro dialog ---------- */
+const pickCount = () => DATA.leads.filter(l => state.dialog.picks[l.id] && !state.lead[l.id].inSalgsro).length;
+const addLabel = n => (n ? `Add ${plural(n, 'lead', 'leads')}` : 'Add leads');
+
+function dialogHtml() {
+  const d = state.dialog;
+  const rows = [...DATA.leads].sort((a, b) => b.score - a.score).map(l => {
+    const added = state.lead[l.id].inSalgsro;
+    return `<li><label class="pick" for="pick-${l.id}">
+      <input type="checkbox" id="pick-${l.id}" data-pick="${l.id}"${d.picks[l.id] ? ' checked' : ''}${added ? ' disabled' : ''}>
+      <span class="grow stack-4"><span class="strong">${esc(l.name)}</span>${added ? '<span class="meta">already in Salgsro</span>' : ''}</span>
+      <span class="mono"><span class="sr-only">Score </span>${l.score}</span><span class="chip ${CLASS_CHIP[l.cls]}">${l.cls}</span>
+    </label></li>`;
+  }).join('');
+  const n = pickCount();
+  return `<h2 class="detail-title display" id="dialog-title">Add to Salgsro</h2>
+<p class="meta" id="dialog-desc">Only leads you tick are added. Nothing moves on its own.</p>
+<ul class="picks">${rows}</ul>
+<p class="error" id="dialog-error" role="alert" hidden></p>
+<div class="dialog-foot">
+  <button type="button" class="btn btn-ghost" data-action="dialog-cancel" data-arg="">Cancel</button>
+  <button type="button" class="btn btn-primary" id="dialog-confirm" data-action="dialog-confirm" data-arg=""${n ? '' : ' disabled'}>${addLabel(n)}</button>
+</div>`;
+}
+
+function setModal(on) {
+  document.querySelector('.main').inert = on;
+  document.querySelector('.nav').inert = on;
+  document.documentElement.classList.toggle('no-scroll', on);
+}
+
+function dialogFocusables() {
+  return Array.from($('dialog-panel').querySelectorAll('button, input, a[href]')).filter(x => !x.disabled);
+}
+
+function closeDialog(returnFocus = true) {
+  const d = state.dialog;
+  d.open = false;
+  d.busy = false;
+  $('dialog').hidden = true;
+  $('dialog-panel').innerHTML = '';
+  setModal(false);
+  if (!returnFocus) return;
+  if (d.trigger && d.trigger.isConnected) d.trigger.focus();
+  else restore('[data-action="dialog-open"]');
+}
+
 /* ---------- Intel view ---------- */
 function intelView() {
-  const focus = state.intelFocus || {};
-  const comps = DATA.competitors.map(c => {
-    const rs = DATA.reviews.filter(v => v.comp === c.id);
-    const avg = rs.reduce((sum, v) => sum + v.stars, 0) / rs.length;
-    const dist = [5, 4, 3, 2, 1].map(n => {
-      const k = rs.filter(v => v.stars === n).length;
-      return `<div class="dist-row"><span class="mono meta">${n}★</span><span class="bar"><span class="bar-fill" style="width:${Math.round(k / rs.length * 100)}%"></span></span><span class="mono meta end">${k}</span></div>`;
-    }).join('');
-    const on = focus.comp === c.id;
-    return `<article class="card${on ? ' is-selected' : ''}" id="comp-${c.id}"${on ? ' tabindex="-1"' : ''} aria-labelledby="comp-name-${c.id}">
-      <div class="card-row"><h3 class="card-title" id="comp-name-${c.id}">${esc(c.name)}</h3>${c.stores.map(st => `<span class="chip">${st}</span>`).join('')}</div>
-      <p class="mono meta">${rs.length} reviews · avg ${avg.toFixed(1)}★</p>
-      <div class="dist">${dist}</div>
-    </article>`;
+  const comps = DATA.competitors.map(c => ({ c, rs: DATA.reviews.filter(v => v.comp === c.id) }));
+  const week = `Week ${DATA.run.week} · ${comps.map(({ c, rs }) => `${esc(c.name)} <span class="mono">${rs.length}</span> reviews`).join(' · ')}`;
+  const compRows = comps.map(({ c, rs }) => {
+    const avg = rs.length ? (rs.reduce((sum, v) => sum + v.stars, 0) / rs.length).toFixed(1) : null;
+    return `<li class="row"><p><span class="strong">${esc(c.name)}</span><span class="meta"> · ${c.stores.join(', ')} · <span class="mono">${rs.length}</span> reviews${avg ? ` · avg <span class="mono">${avg}</span>★` : ''}</span></p></li>`;
   }).join('');
 
-  const row = v => `<li class="row${focus.review === v.id ? ' row-focus' : ''}" id="rev-${v.id}">
+  const row = v => `<li class="row">
       <p class="strong">${esc(v.insight)}</p>
       <div class="card-row meta">${stars(v.stars)}<span class="chip">${v.store}</span><span>${v.ageD}d ago</span><span class="chip chip-accent">${esc(COMP[v.comp].name)}</span></div>
       <p class="meta clamp-2" lang="${v.lang}">“${esc(v.text)}”</p>
@@ -1317,31 +1446,44 @@ function intelView() {
     <div class="card">${items.length ? `<ul class="rows">${items.map(row).join('')}</ul>` : `<p class="meta">${empty}</p>`}</div>
   </section>`;
 
-  const ideas = DATA.ideas.map(i => {
-    const saved = !!state.ideas[i.id];
-    return `<li class="row"><div class="card-line">
-      <div class="grow stack-4"><p>${esc(i.text)}</p><p class="meta">From: ${esc(i.from)}</p></div>
-      <button type="button" class="btn btn-ghost" aria-pressed="${saved}" data-action="idea" data-arg="${i.id}">${saved ? 'Saved' : 'Save idea'}</button>
+  const ideas = DATA.ideas.filter(i => state.ideas[i.id] !== 'dismissed');
+  const ideaRows = ideas.map(i => {
+    const saved = state.ideas[i.id] === 'saved';
+    return `<li class="row"><div class="stack-8">
+      <div class="stack-4"><p class="strong" id="idea-t-${i.id}">${esc(i.text)}</p><p class="meta">Gap: ${esc(i.from)}</p></div>
+      <div class="card-row">
+        <button type="button" class="btn btn-ghost" aria-pressed="${saved}" aria-describedby="idea-t-${i.id}" data-action="idea" data-arg="${i.id}">${saved ? 'Saved' : 'Save idea'}</button>
+        <button type="button" class="btn btn-ghost" aria-describedby="idea-t-${i.id}" data-action="idea-dismiss" data-arg="${i.id}">Dismiss</button>
+      </div>
     </div></li>`;
   }).join('');
 
   return `<div class="single">
-  <section class="section" aria-labelledby="h-week">
-    <h2 class="eyebrow" id="h-week">This week</h2>
-    <div class="grid-2">${comps}</div>
+  <p class="meta">${week}</p>
+  <section class="section" aria-labelledby="h-ideas">
+    <h2 class="eyebrow" id="h-ideas" tabindex="-1">Ideas (${ideas.length})</h2>
+    <div class="card">${ideas.length ? `<ul class="rows">${ideaRows}</ul>` : '<p class="meta">No open ideas this week.</p>'}</div>
+  </section>
+  <section class="section" aria-labelledby="h-comps">
+    <h2 class="eyebrow" id="h-comps">Competitors</h2>
+    <div class="card"><ul class="rows">${compRows}</ul></div>
   </section>
   ${listSection('gaps', 'Gaps users mention', DATA.reviews.filter(v => v.kind === 'gap').sort(byAge), 'No gaps mentioned this week.')}
   ${listSection('praise', 'What users praise', DATA.reviews.filter(v => v.kind === 'praise').sort(byAge), 'No praise this week.')}
   ${listSection('switch', 'Switching intent', DATA.reviews.filter(v => v.kind === 'switch').sort(byAge), "No one said they're leaving this week.")}
-  <section class="section" aria-labelledby="h-ideas">
-    <h2 class="eyebrow" id="h-ideas">Content ideas from this</h2>
-    <div class="card"><ul class="rows">${ideas}</ul></div>
-  </section>
 </div>`;
 }
 
 /* ---------- Setup view ---------- */
+function funnelHtml() {
+  const f = DATA.funnel;
+  const item = (label, value) => `<span class="funnel-item"><span class="meta">${label}</span> <span class="mono">${value}</span></span>`;
+  const dot = '<span class="meta" aria-hidden="true">·</span>';
+  return `<p class="funnel">${item('fetched', f.fetched)}${dot}${item('signals', f.signals)}${dot}${item('actions', f.actions)}${dot}${item('cost', f.cost)}</p>`;
+}
+
 function setupView() {
+  const f = DATA.funnel;
   const sources = DATA.sources.map(s => {
     const st = state.sources[s.id];
     const chip = st === 'on' ? '<span class="chip chip-good">On</span>'
@@ -1381,6 +1523,19 @@ function setupView() {
   const runs = DATA.runs.map(r => `<tr><td class="td mono">${r.date}</td><td class="td mono end">${r.fetched}</td><td class="td mono end">${r.signals}</td><td class="td mono end">${r.cost}</td></tr>`).join('');
 
   return `<div class="single">
+  <section class="section" aria-labelledby="h-run">
+    <h2 class="eyebrow" id="h-run">Today's run</h2>
+    <div class="card">
+      ${funnelHtml()}
+      <p class="meta mono">${esc(f.bySource)}</p>
+      <hr class="divider">
+      <div class="stack-4">
+        <p class="meta strong">Why Today might be empty</p>
+        <p class="meta">Sources ran, ${f.signals} signals found, ${f.actions} made the cut (cap ${TODAY_CAP}).</p>
+      </div>
+    </div>
+  </section>
+
   <section class="section" aria-labelledby="h-sources">
     <h2 class="eyebrow" id="h-sources">Sources</h2>
     <div class="card"><ul class="rows">${sources}</ul></div>
@@ -1418,7 +1573,10 @@ function setupView() {
 
 /* ---------- Render ---------- */
 function defaultSel(tab) {
-  if (tab === 'today') return DATA.replies[0].id;
+  if (tab === 'today') {
+    const first = todayQueue().open[0];
+    return first ? first.id : null;
+  }
   const first = filteredLeads()[0];
   return first ? first.id : DATA.leads[0].id;
 }
@@ -1427,13 +1585,6 @@ function currentSel() {
   if (t !== 'today' && t !== 'pipeline') return null;
   if (isDesk()) return state.sel[t] || defaultSel(t);
   return state.detailOpen ? state.sel[t] : null;
-}
-
-function funnelHtml(hidden) {
-  const f = DATA.funnel;
-  const item = (label, value, title) => `<span class="funnel-item"${title ? ` title="${esc(title)}"` : ''}><span class="meta">${label}</span> <span class="mono">${value}</span></span>`;
-  const dot = '<span class="meta" aria-hidden="true">·</span>';
-  return `<p class="funnel"${hidden ? ' hidden' : ''}>${item('fetched', f.fetched, f.bySource)}${dot}${item('signals', f.signals)}${dot}${item('actions', f.actions)}${dot}${item('cost', f.cost)}</p>`;
 }
 
 function renderNav() {
@@ -1446,9 +1597,9 @@ function renderNav() {
 function renderHeader() {
   const t = state.tab;
   const back = !isDesk() && state.detailOpen && !!currentSel();
-  const layout = t === 'today' && !back;
+  const actions = t === 'pipeline' && !back;
   $('header').innerHTML = `<div class="header-title">${back ? '<button type="button" class="btn btn-text" data-action="back" data-arg=""><span aria-hidden="true">←</span> Back</button>' : ''}<h1 class="page-title">${TITLES[t]}</h1></div>
-${layout ? `<div class="header-layout"><span class="meta" id="layout-label">Layout</span><div class="seg" role="group" aria-labelledby="layout-label">${Object.keys(VARIANTS).map(k => `<button type="button" class="seg-btn" aria-pressed="${state.variant === k}" aria-label="${k}: ${VARIANTS[k]}" data-action="variant" data-arg="${k}">${k}</button>`).join('')}</div><span class="meta">${VARIANTS[state.variant]}</span></div>` : ''}
+${actions ? '<div class="header-actions"><button type="button" class="btn btn-primary" data-action="dialog-open" data-arg="" aria-haspopup="dialog">Add top leads to Salgsro</button></div>' : ''}
 <div class="header-meta"><span class="mono header-date">${DATA.run.label}</span><span class="chip">Example data</span></div>`;
   document.title = `${TITLES[t]} · SocialSelling`;
 }
@@ -1475,8 +1626,7 @@ function renderView() {
   if (t === 'today' || t === 'pipeline') {
     const sel = currentSel();
     const hideList = !isDesk() && !!sel;
-    view.innerHTML = `${t === 'today' ? funnelHtml(hideList) : ''}
-<div class="split">
+    view.innerHTML = `<div class="split">
   <div class="col-list" id="list"${hideList ? ' hidden' : ''}></div>
   <div class="col-detail" id="detail"${sel ? '' : ' hidden'}></div>
 </div>`;
@@ -1495,23 +1645,24 @@ function render(focusSelector) {
   restore(focusSelector || key);
 }
 
+/* Focus after an item leaves Today: the next card, else the count line or the done state. */
+function focusTodayFallback() {
+  return restore('#today-count') || restore('#today-done');
+}
+
 /* ---------- Routing ---------- */
 function applyHash() {
   const h = location.hash.replace('#', '');
   const t = TABS.includes(h) ? h : 'today';
   const changed = t !== state.tab;
+  if (state.dialog.open) closeDialog(false);
   state.tab = t;
-  if (changed) state.detailOpen = false;
-  render();
-  if (t === 'intel' && state.intelFocus) {
-    const card = $(`comp-${state.intelFocus.comp}`);
-    if (card) {
-      card.focus({ preventScroll: true });
-      card.scrollIntoView({ block: 'start' });
-    }
-  } else if (changed) {
-    window.scrollTo(0, 0);
+  if (changed) {
+    state.detailOpen = false;
+    state.skipOpen = null;
   }
+  render();
+  if (changed) window.scrollTo(0, 0);
 }
 function go(tab) {
   if (location.hash === `#${tab}`) applyHash();
@@ -1521,24 +1672,8 @@ function go(tab) {
 /* ---------- Actions ---------- */
 const ACTIONS = {
   tab(t) {
-    state.intelFocus = null;
     state.detailOpen = false;
     go(t);
-  },
-  variant(k) {
-    state.variant = k;
-    persist();
-    render();
-  },
-  feed(f) {
-    state.feedFilter = f;
-    persist();
-    keep(renderList);
-  },
-  product(p) {
-    state.product = p;
-    persist();
-    keep(renderList);
   },
   'lead-filter'(v) {
     state.leadFilter = v;
@@ -1571,13 +1706,54 @@ const ACTIONS = {
     render(selector);
     const card = document.querySelector(selector);
     if (card) card.scrollIntoView({ block: 'center' });
+    else if (state.tab === 'today') focusTodayFallback();
   },
-  'open-intel'(id) {
-    const v = REVIEW[id];
-    state.intelFocus = { comp: v.comp, review: id };
-    state.detailOpen = false;
-    go('intel');
+
+  /* Skip: open the reason chooser, pick a reason, or cancel */
+  skip(key) {
+    const open = state.skipOpen !== key;
+    setSkip(key, open);
+    if (open) {
+      const first = document.querySelector(`#skip-${key.replace(':', '-')} .pill`);
+      if (first) first.focus();
+    }
   },
+  'skip-cancel'(key) {
+    setSkip(key, false);
+    restore(`[data-action="skip"][data-arg="${key}"]`);
+  },
+  'skip-reason'(arg) {
+    const [where, id, reason] = arg.split(':');
+    const later = reason === 'later';
+    const before = todayQueue().open.map(i => i.id);
+    state.queue[id] = later ? 'later' : 'skipped';
+    state.skipReason[id] = reason;
+    state.skipOpen = null;
+    const after = todayQueue().open.map(i => i.id);
+    const pos = before.indexOf(id);
+    const next = before.slice(pos + 1).find(x => after.includes(x))
+      || before.slice(0, Math.max(pos, 0)).reverse().find(x => after.includes(x))
+      || null;
+    const target = next ? `[data-action="open"][data-arg="${next}"]` : null;
+    const wasSelected = state.sel.today === id;
+    if (wasSelected) state.sel.today = isDesk() ? next : null;
+
+    if (isDesk()) {
+      renderList();
+      if (wasSelected) renderDetail();
+      if (!restore(target)) focusTodayFallback();
+    } else {
+      if (where === 'detail') state.detailOpen = false;
+      render(target);
+      if (!target) focusTodayFallback();
+      if (where === 'detail') {
+        const el = document.activeElement;
+        if (el && el !== document.body) el.scrollIntoView({ block: 'center' });
+      }
+    }
+    toast(later ? 'Moved to Later' : 'Skipped · teaches the filter');
+  },
+
   nolink(id) {
     const s = state.reply[id];
     s.variant = s.variant === 'nolink' ? 'default' : 'nolink';
@@ -1613,7 +1789,11 @@ const ACTIONS = {
     const s = state.reply[id];
     if (!s.posted) {
       s.posted = true;
-      s.undoTimer = setTimeout(() => { s.undoTimer = null; syncPost(id); }, 10000);
+      s.undoTimer = setTimeout(() => {
+        s.undoTimer = null;
+        syncPost(id);
+        keep(renderList);
+      }, 10000);
       toast('Marked as posted');
     } else if (s.undoTimer) {
       clearTimeout(s.undoTimer);
@@ -1624,14 +1804,14 @@ const ACTIONS = {
       return;
     }
     syncPost(id);
-    renderList();
+    keep(renderList);
   },
   status(arg) {
     const [id, st] = arg.split(':');
     if (state.lead[id].status === st) return;
     state.lead[id].status = st;
     syncStatus(id);
-    renderList();
+    keep(renderList);
     toast(`Saved: ${STATUS_LABEL[st]}`);
   },
   'save-note'() {
@@ -1649,11 +1829,69 @@ const ACTIONS = {
     const [id, i] = arg.split(':');
     copyText(LEAD[id].contacts[Number(i)].email, $(`email-${id}-${i}`));
   },
-  idea(id, btn) {
-    state.ideas[id] = !state.ideas[id];
-    btn.setAttribute('aria-pressed', String(state.ideas[id]));
-    btn.textContent = state.ideas[id] ? 'Saved' : 'Save idea';
+  'add-lead'(id) {
+    state.lead[id].inSalgsro = true;
+    syncSalgsro(id);
+    renderList();
+    restore(`#salgsro-link-${id}`);
+    toast('Added to Salgsro');
+  },
+
+  /* Add-to-Salgsro dialog */
+  'dialog-open'(arg, btn) {
+    const d = state.dialog;
+    d.open = true;
+    d.busy = false;
+    d.trigger = btn;
+    d.picks = {};
+    DATA.leads.forEach(l => {
+      d.picks[l.id] = !state.lead[l.id].inSalgsro && (l.cls === 'HOT' || l.cls === 'STRONG');
+    });
+    $('dialog-panel').innerHTML = dialogHtml();
+    $('dialog').hidden = false;
+    setModal(true);
+    const first = dialogFocusables()[0];
+    if (first) first.focus();
+  },
+  'dialog-cancel'() {
+    if (!state.dialog.busy) closeDialog();
+  },
+  'dialog-confirm'(arg, btn) {
+    const d = state.dialog;
+    const ids = DATA.leads.filter(l => d.picks[l.id] && !state.lead[l.id].inSalgsro).map(l => l.id);
+    if (!ids.length || d.busy) return;
+    d.busy = true;
+    btn.textContent = 'Adding…';
+    btn.setAttribute('aria-disabled', 'true');
+    $('dialog-panel').setAttribute('aria-busy', 'true');
+    $('dialog-panel').querySelectorAll('[data-pick]').forEach(c => { c.disabled = true; });
+    setTimeout(() => {
+      if (!d.open) return;
+      ids.forEach(id => {
+        state.lead[id].inSalgsro = true;
+        syncSalgsro(id);
+      });
+      $('dialog-panel').removeAttribute('aria-busy');
+      renderList();
+      closeDialog();
+      toast(`Added ${plural(ids.length, 'lead', 'leads')} to Salgsro`);
+    }, 600);
+  },
+
+  idea(id) {
+    if (state.ideas[id] === 'saved') delete state.ideas[id];
+    else state.ideas[id] = 'saved';
+    render();
     toast(state.ideas[id] ? 'Idea saved' : 'Idea removed');
+  },
+  'idea-dismiss'(id) {
+    const list = DATA.ideas.filter(i => state.ideas[i.id] !== 'dismissed').map(i => i.id);
+    const pos = list.indexOf(id);
+    state.ideas[id] = 'dismissed';
+    const rest = list.filter(x => x !== id);
+    const next = rest[Math.min(pos, rest.length - 1)];
+    render(next ? `[data-action="idea"][data-arg="${next}"]` : '#h-ideas');
+    toast('Idea dismissed');
   },
   source(id) {
     const on = state.sources[id] === 'on';
@@ -1674,6 +1912,10 @@ const ACTIONS = {
 
 /* ---------- Events ---------- */
 document.addEventListener('click', e => {
+  if (state.dialog.open && e.target === $('dialog')) {
+    if (!state.dialog.busy) closeDialog();
+    return;
+  }
   const t = e.target.closest('[data-action]');
   if (!t || t.disabled || t.getAttribute('aria-disabled') === 'true') return;
   const fn = ACTIONS[t.dataset.action];
@@ -1696,8 +1938,58 @@ document.addEventListener('input', e => {
   }
 });
 
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (!t.dataset || !t.dataset.pick || state.dialog.busy) return;
+  state.dialog.picks[t.dataset.pick] = t.checked;
+  const n = pickCount();
+  const btn = $('dialog-confirm');
+  if (!btn) return;
+  btn.textContent = addLabel(n);
+  btn.disabled = n === 0;
+});
+
+/* <details> toggle does not bubble: listen in the capture phase to remember open state. */
+document.addEventListener('toggle', e => {
+  const d = e.target;
+  if (d.dataset && d.dataset.key) state.open[d.dataset.key] = d.open;
+}, true);
+
 document.addEventListener('keydown', e => {
   const t = e.target;
+
+  if (state.dialog.open) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (!state.dialog.busy) closeDialog();
+      return;
+    }
+    if (e.key === 'Tab') {
+      const f = dialogFocusables();
+      if (!f.length) { e.preventDefault(); return; }
+      const first = f[0];
+      const last = f[f.length - 1];
+      const inside = $('dialog-panel').contains(document.activeElement);
+      if (e.shiftKey && (document.activeElement === first || !inside)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || !inside)) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    return;
+  }
+
+  if (e.key === 'Escape' && state.skipOpen) {
+    const inChooser = t.closest && t.closest('.skip');
+    const onTrigger = t.dataset && t.dataset.action === 'skip';
+    if (inChooser || onTrigger) {
+      e.preventDefault();
+      ACTIONS['skip-cancel'](state.skipOpen);
+      return;
+    }
+  }
   if (e.key === 'Escape' && !isDesk() && state.detailOpen) {
     ACTIONS.back();
     return;
