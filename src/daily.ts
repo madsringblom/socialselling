@@ -25,6 +25,7 @@ import {
   upsertDailyStats,
 } from "./db.ts";
 import type { DailyStats, Item, PrefilterRow } from "./db.ts";
+import { playsNote, runPlays } from "./plays/index.ts";
 import { compileMatchers, prefilterItem, selectCandidates } from "./prefilter.ts";
 import { leadCount, renderReport, tallyLeads, writeStatsFile } from "./report.ts";
 import { SCORING_BODY_MAX, scoreItems } from "./score.ts";
@@ -190,6 +191,11 @@ async function runDaily(cfg: Config): Promise<void> {
   errors.push(...scoring.errors);
   log(`scored ${scoring.results.length}/${inputs.length} in ${scoring.calls} calls · $${scoring.costUsd.toFixed(4)}`);
 
+  const plays = await runPlays({ cfg, now, runDate, log });
+  errors.push(...plays.errors);
+  notes.push(...plays.notes, playsNote(plays));
+  log(`plays: drafts ${plays.drafts} · researched ${plays.researched} · ideas ${plays.ideas} · $${plays.costUsd.toFixed(4)}`);
+
   const prev = getDailyStats(runDate);
   const tally = tallyLeads(scoredForDate(runDate));
   const finished = Date.now();
@@ -201,7 +207,7 @@ async function runDaily(cfg: Config): Promise<void> {
     prefiltered: countPassed(runDate),
     scored: countScored(runDate),
     leads_json: JSON.stringify(tally),
-    api_cost_usd: (prev?.api_cost_usd ?? 0) + scoring.costUsd,
+    api_cost_usd: (prev?.api_cost_usd ?? 0) + scoring.costUsd + plays.costUsd,
     errors: errors.length,
     duration_s: Math.round((finished - started) / 1000),
     finished_at: Math.floor(finished / 1000),

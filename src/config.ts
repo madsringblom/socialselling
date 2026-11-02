@@ -6,7 +6,8 @@ import { z } from "zod";
 export const ROOT = resolve(import.meta.dir, "..");
 export const DATA_DIR = join(ROOT, "data");
 export const REPORTS_DIR = join(ROOT, "reports");
-export const DB_PATH = join(DATA_DIR, "social.db");
+export const DB_PATH = process.env.DB_PATH?.trim() || join(DATA_DIR, "social.db");
+export const SALGSRO_DIR = join(DATA_DIR, "salgsro");
 export const LOCK_PATH = join(DATA_DIR, "run.lock");
 export const STATS_PATH = join(DATA_DIR, "stats.jsonl");
 export const PRODUCTS_PATH = join(ROOT, "products.yaml");
@@ -40,7 +41,25 @@ const FeedSchema = z.object({
   lang: z.string().default("en"),
 });
 
-const ProductSchema = z.object({
+/** Which plays run for a product. competitor_intel defaults to "has competitors" (resolved in ProductSchema). */
+const PlaysSchema = z
+  .object({
+    reply_drafts: z.boolean().default(true),
+    lead_research: z.boolean().default(false),
+    competitor_intel: z.boolean().optional(),
+  })
+  .default({ reply_drafts: true, lead_research: false });
+
+/** Tone reference and hard limits for reply drafts. */
+const VoiceSchema = z
+  .object({
+    examples: z.array(z.string().min(1)).default([]),
+    never_claim: z.array(z.string().min(1)).default([]),
+    link: z.string().nullable().default(null),
+  })
+  .default({ examples: [], never_claim: [], link: null });
+
+const ProductBase = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/, "id must be lowercase letters, digits and dashes"),
   name: z.string().min(1),
   url: z.string(),
@@ -65,7 +84,14 @@ const ProductSchema = z.object({
       danish_phrases: z.array(z.string().min(1)).default([]),
     })
     .default({ enabled: true, danish_phrases: [] }),
+  plays: PlaysSchema,
+  voice: VoiceSchema,
 });
+
+const ProductSchema = ProductBase.transform((p) => ({
+  ...p,
+  plays: { ...p.plays, competitor_intel: p.plays.competitor_intel ?? p.competitors.length > 0 },
+}));
 
 const ConfigSchema = z.object({
   products: z.array(ProductSchema).min(1),
@@ -81,6 +107,7 @@ const ConfigSchema = z.object({
 
 export type Product = z.infer<typeof ProductSchema>;
 export type Config = z.infer<typeof ConfigSchema>;
+export type Plays = { reply_drafts: boolean; lead_research: boolean; competitor_intel: boolean }; // = Product["plays"]
 
 export const SOCIAL_WINDOW_S = 36 * 3600;
 export const SLOW_WINDOW_S = 30 * 86400; // reviews and articles: low volume, kept 30 days
@@ -109,6 +136,14 @@ function intEnv(name: string, fallback: number): number {
   return n;
 }
 
+function floatEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const n = Number.parseFloat(raw);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${name} must be a non-negative number, got "${raw}"`);
+  return n;
+}
+
 export const TZ = process.env.TZ?.trim() || "Europe/Copenhagen";
 export const MODEL = process.env.CLAUDE_MODEL?.trim() || "claude-haiku-5-5";
 export const REDDIT_USERNAME = process.env.REDDIT_USERNAME?.trim() || "";
@@ -116,6 +151,13 @@ export const REDDIT_CLIENT_ID = process.env.REDDIT_CLIENT_ID?.trim() || "";
 export const REDDIT_CLIENT_SECRET = process.env.REDDIT_CLIENT_SECRET?.trim() || "";
 export const FETCH_THREAD_CONTEXT = (process.env.FETCH_THREAD_CONTEXT ?? "true").trim().toLowerCase() !== "false";
 export const MAX_SCORED_PER_DAY = intEnv("MAX_SCORED_PER_DAY", 400);
+export const DRAFT_MODEL = process.env.DRAFT_MODEL?.trim() || "claude-opus-5-5";
+export const RESEARCH_MODEL = process.env.RESEARCH_MODEL?.trim() || "claude-opus-5-5";
+export const MAX_DRAFTS_PER_DAY = intEnv("MAX_DRAFTS_PER_DAY", 5);
+export const DRAFT_MIN_CONFIDENCE = floatEnv("DRAFT_MIN_CONFIDENCE", 0.6);
+export const MAX_RESEARCH_PER_DAY = intEnv("MAX_RESEARCH_PER_DAY", 3);
+export const DRAFT_EXPIRY_H = intEnv("DRAFT_EXPIRY_H", 24);
+export const UI_PORT = intEnv("UI_PORT", 8787);
 
 export function requireApiKey(): void {
   if (!process.env.ANTHROPIC_API_KEY?.trim()) {
@@ -139,6 +181,57 @@ export function localDate(d = new Date()): string {
 export function localTime(d = new Date(), withSeconds = false): string {
   const p = parts(d, { hour: "2-digit", minute: "2-digit", ...(withSeconds ? { second: "2-digit" } : {}) });
   return withSeconds ? `${p.hour}:${p.minute}:${p.second}` : `${p.hour}:${p.minute}`;
+}
+
+/** "YYYY-MM-DD-HHmm" in TZ, for file names. */
+export function localDateTimeCompact(d = new Date()): string {
+  const p = parts(d, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return `${p.year}-${p.month}-${p.day}-${p.hour}${p.minute}`;
+}
+
+/** Epoch seconds of local midnight (in TZ) at the start of a YYYY-MM-DD date. */
+export function startOfLocalDay(date: string): number {
+  const guess = ymdToUtcMs(date);
+  let t = guess;
+  for (let i = 0; i < 2; i++) {
+    const p = parts(new Date(t), {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    const asUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
+    t = guess - (asUtc - t);
+  }
+  return Math.floor(t / 1000);
+}
+
+const DAY_MS = 86_400_000;
+
+function ymdToUtcMs(date: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) throw new Error(`expected a YYYY-MM-DD date, got "${date}"`);
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+const utcMsToYmd = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/** Y-M-D string arithmetic (UTC, no time zone involved). */
+export function addDays(date: string, n: number): string {
+  return utcMsToYmd(ymdToUtcMs(date) + n * DAY_MS);
+}
+
+/** ISO 8601 week of a Y-M-D date: key "2026-W45" plus that week's Monday and Sunday. */
+export function isoWeek(date: string): { key: string; monday: string; sunday: string } {
+  const ms = ymdToUtcMs(date);
+  const dow = (new Date(ms).getUTCDay() + 6) % 7; // Monday = 0
+  const monday = ms - dow * DAY_MS;
+  const thursday = monday + 3 * DAY_MS;
+  const year = new Date(thursday).getUTCFullYear();
+  const week = Math.floor((thursday - Date.UTC(year, 0, 1)) / (7 * DAY_MS)) + 1;
+  return { key: `${year}-W${String(week).padStart(2, "0")}`, monday: utcMsToYmd(monday), sunday: utcMsToYmd(monday + 6 * DAY_MS) };
 }
 
 export const runDate = localDate();

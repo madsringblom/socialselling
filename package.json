@@ -4,7 +4,10 @@
   "private": true,
   "scripts": {
     "daily": "bun src/daily.ts",
-    "report": "bun src/daily.ts --report-only"
+    "report": "bun src/daily.ts --report-only",
+    "ui": "bun src/server.ts",
+    "test": "bun test",
+    "import-leads": "bun src/import-leads.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

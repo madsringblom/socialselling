@@ -181,8 +181,10 @@ export function renderReport(date: string, cfg: Config): string {
   const articles = rows.filter((r) => r.kind === "article");
   out.push(
     `By kind: social ${signals.filter(isSocial).length} · reviews ${signals.filter((r) => r.kind === "review").length} · articles ${signals.filter((r) => r.kind === "article").length}`,
-    "",
   );
+  const playsLine = stats ? (JSON.parse(stats.notes || "[]") as string[]).find((n) => n.startsWith("plays:")) : undefined;
+  if (playsLine) out.push(`Plays: ${playsLine.slice(7)}`);
+  out.push("");
 
   out.push("## Week to date", "", ...weekTable(recentDailyStats(date, 7), products), "");
 

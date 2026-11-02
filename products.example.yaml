@@ -44,6 +44,20 @@ products:
         # google_play: com.example.invoices # accepted, not collected yet
     # Bing News searches (Danish market, non-English results allowed).
     news_queries: ["freelancer fakturering"]
+    # Plays that run after scoring (all optional):
+    #   reply_drafts (default true): draft replies to asking_for_tool / describing_problem posts, for you to post by hand.
+    #   lead_research (default false): extract organisations from posts and articles and research them as leads.
+    #   competitor_intel (default: true when competitors are listed): weekly ideas from competitor-review gaps.
+    plays: { reply_drafts: true, lead_research: false, competitor_intel: true }
+    # Reply-draft voice (all optional):
+    #   examples (default []): replies in your own tone; used as tone reference only, never copied.
+    #   never_claim (default []): things a draft must never claim (pricing, integrations you don't have, ...).
+    #   link (default null): the only URL a draft may include; null = drafts never link.
+    voice:
+      examples:
+        - "I stopped chasing invoices in a spreadsheet. One list of sent, due and paid, and a reminder only when something is late."
+      never_claim: ["pricing or a free plan", "integrations with accounting software"]
+      link: https://example.com
 
 # Extra RSS 2.0 / Atom feeds, e.g. Google Alerts with delivery set to "RSS feed".
 feeds:
