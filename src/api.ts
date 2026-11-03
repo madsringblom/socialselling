@@ -39,6 +39,8 @@ import type {
   Signal,
   StackEntry,
 } from "./db.ts";
+import { getGmailConfig, gmailStatus, isConfigured } from "./mail/gmail.ts";
+import type { GmailStatus } from "./mail/gmail.ts";
 import { digest } from "./plays/intel.ts";
 import type { Digest } from "./plays/intel.ts";
 import { COMPONENT_LABEL, COMPONENT_MAX, topSignal } from "./plays/leadscore.ts";
@@ -155,6 +157,8 @@ export type SetupDTO = {
   schedule: string;
   runs: { date: string; fetched: number; signals: number; cost: string }[];
   caps: { max_drafts_per_day: number; draft_min_confidence: number; max_research_per_day: number; draft_expiry_h: number };
+  /** Gmail connection for the mail source (Facebook/LinkedIn group notifications). */
+  gmail: GmailStatus;
 };
 
 // ---------------------------------------------------------------- dates
@@ -244,6 +248,11 @@ function sourceLabel(item: ScoredItem): string {
       return "Bluesky";
     case "appstore":
       return "App Store";
+    case "mail":
+      if (/facebook\.com/i.test(item.url)) return "Facebook group";
+      if (/linkedin\.com/i.test(item.url)) return "LinkedIn group";
+      if (item.found_via === "paste") return "Pasted post";
+      return "Group mail";
     default:
       return "News";
   }
@@ -464,11 +473,18 @@ const SOURCE_NAMES: Record<string, string> = {
   reddit: "Reddit",
   hn: "Hacker News",
   bluesky: "Bluesky",
+  mail: "Facebook & LinkedIn groups (Gmail)",
   appstore: "App Store reviews",
   rss: "News & feeds",
 };
 
 function sourceNote(id: string, cfg: Config): string {
+  if (id === "mail") {
+    const g = getGmailConfig();
+    const status = gmailStatus(g);
+    const email = status.state === "connected" && status.email ? ` · ${status.email}` : "";
+    return `label "${g.label}" · ≤${g.maxPerRun}/run${email}`;
+  }
   if (id === "appstore") {
     return cfg.products
       .flatMap((p) => p.competitors.flatMap((c) => (c.app_store ? [`${c.name} ${c.app_store.countries.join(", ")}`] : [])))
@@ -529,6 +545,10 @@ export function setup(cfg: Config, now: number): SetupDTO {
     if (s.id === "reddit") {
       return { id: s.id, name, status: "unavailable", last: null, note: "Set REDDIT_CLIENT_ID/SECRET; API closes March 2027" };
     }
+    // No product with mail enabled is a products.yaml choice ("off" with that note), not a missing Google client.
+    if (s.id === "mail" && !isConfigured() && cfg.products.some((p) => p.mail.enabled)) {
+      return { id: s.id, name, status: "unavailable", last: null, note: "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env" };
+    }
     return { id: s.id, name, status: "off", last: null, note: on };
   });
   sources.push({ id: "gplay", name: "Google Play", status: "unavailable", last: null, note: "No official feed" });
@@ -568,5 +588,6 @@ export function setup(cfg: Config, now: number): SetupDTO {
       max_research_per_day: MAX_RESEARCH_PER_DAY,
       draft_expiry_h: DRAFT_EXPIRY_H,
     },
+    gmail: gmailStatus(),
   };
 }

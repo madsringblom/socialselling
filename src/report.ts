@@ -56,7 +56,8 @@ const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 const md = (s: string) => s.replace(/([\\`*_[\]<>|])/g, "\\$1");
 const isSocial = (r: ScoredItem) => r.kind === "post" || r.kind === "comment";
 const storefront = (r: ScoredItem) => r.id.split(":")[1] ?? "";
-const where = (r: ScoredItem) =>
+/** Where an item was found, for report lines and the top-channels list. */
+export const where = (r: ScoredItem) =>
   r.source === "hn"
     ? "HN"
     : r.source === "bluesky"
@@ -65,7 +66,14 @@ const where = (r: ScoredItem) =>
         ? `r/${r.subreddit}`
         : r.source === "appstore"
           ? `App Store ${r.subreddit} (${storefront(r)})`
-          : r.subreddit;
+          : r.source === "mail"
+            ? r.found_via === "paste"
+              ? "Pasted post"
+              : `${r.subreddit} (group)`
+            : r.subreddit;
+/** A markdown link to the item, or the plain (already escaped) text when the item has no URL (pasted posts). */
+export const mdLink = (text: string, url: string) => (url ? `[${text}](<${url}>)` : text);
+const titleLink = (r: ScoredItem) => mdLink(md(oneLine(r.title) || "(untitled)"), r.url);
 const stars = (n: number | null) => {
   if (n == null) return "";
   const k = Math.max(0, Math.min(5, Math.round(n)));
@@ -87,7 +95,7 @@ function leadEntry(r: ScoredItem, refTime: number): string {
   const flags = FLAG_LABELS.filter(([k]) => r.flags[k]).map(([, label]) => label);
   const meta = [where(r), r.kind, ago(refTime - r.created_at), `conf ${r.confidence.toFixed(2)}`];
   if (flags.length) meta.push(`flags: ${flags.join(", ")}`);
-  const lines = [`- **[${md(oneLine(r.title) || "(untitled)")}](<${r.url}>)** — ${meta.join(" · ")}`];
+  const lines = [`- **${titleLink(r)}** — ${meta.join(" · ")}`];
   const body = excerpt(r.body);
   if (body) lines.push(`  > ${body}`);
   lines.push(`  _Reason: ${md(r.reason)}_`);
@@ -106,7 +114,7 @@ const verdict = (r: ScoredItem, products: Product[]) =>
 function reviewEntry(r: ScoredItem, refTime: number, products: Product[]): string {
   const s = stars(r.rating);
   const meta = [storefront(r), ago(refTime - r.created_at), verdict(r, products)];
-  const lines = [`- ${s ? `${s} ` : ""}**[${md(oneLine(r.title) || "(untitled)")}](<${r.url}>)** — ${meta.join(" · ")}`];
+  const lines = [`- ${s ? `${s} ` : ""}**${titleLink(r)}** — ${meta.join(" · ")}`];
   const body = excerpt(r.body);
   if (body) lines.push(`  > ${body}`);
   lines.push(insightLine(r));
@@ -118,7 +126,7 @@ function articleEntry(r: ScoredItem, refTime: number, products: Product[]): stri
   const meta = [md(channel), ago(refTime - r.created_at), verdict(r, products)];
   const publication = oneLine(r.author);
   if (publication) meta.unshift(md(publication));
-  return [`- **[${md(oneLine(r.title) || "(untitled)")}](<${r.url}>)** — ${meta.join(" · ")}`, insightLine(r)].join("\n");
+  return [`- **${titleLink(r)}** — ${meta.join(" · ")}`, insightLine(r)].join("\n");
 }
 
 function productGroups(rows: ScoredItem[], products: Product[]): { label: string; rows: ScoredItem[] }[] {
@@ -222,7 +230,7 @@ export function renderReport(date: string, cfg: Config): string {
     const hidden = articles.length - shown.length - noted.length;
     if (articles.length === 0) out.push("_None._");
     out.push(...shown.map((r) => articleEntry(r, refTime, products)));
-    for (const r of noted) out.push(`- _${md(r.insight!)}_ — [${md(oneLine(r.title) || "(untitled)")}](<${r.url}>)`);
+    for (const r of noted) out.push(`- _${md(r.insight!)}_ — ${titleLink(r)}`);
     if (hidden > 0) out.push(`- _${hidden} irrelevant_`);
     out.push("");
   }
@@ -232,7 +240,7 @@ export function renderReport(date: string, cfg: Config): string {
   if (mentions.length === 0) out.push("_None._");
   for (const r of mentions) {
     const product = productName(products, r.matched_product);
-    out.push(`- [${md(oneLine(r.title) || "(untitled)")}](<${r.url}>) — ${product} · ${where(r)} — ${md(r.reason)}`);
+    out.push(`- ${titleLink(r)} — ${product} · ${where(r)} — ${md(r.reason)}`);
   }
   out.push("");
 

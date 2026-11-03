@@ -703,7 +703,7 @@ let DATA = {
   run: null, products: {}, replies: [], leads: [],
   today: { gapsThisWeek: 0 },
   competitors: [], reviews: [], ideas: [], week: '',
-  sources: [], plays: {}, playLocks: {}, schedule: '', runs: [], funnel: null, caps: null,
+  sources: [], plays: {}, playLocks: {}, schedule: '', runs: [], funnel: null, caps: null, gmail: null,
 };
 let REPLY = {}, LEAD = {}, COMP = {};
 let TODAY_ALL = [];
@@ -749,12 +749,16 @@ const state = {
   leadFilter: 'all',
   statusFilter: 'all',
   queue: {},        // Today item id -> 'skipped' | 'later'
+  skipReason: {},   // Today item id -> skip reason
   skipOpen: null,   // open skip chooser: 'card|<id>' | 'detail|<id>'
   open: {},         // <details> open state by data-key
   reply: {},        // per reply: draft text, variant, rating, posted, direction (typed text survives reloads)
   lead: {},         // per lead: status, note, inSalgsro, csvPath, researching
   ideas: {},        // idea id -> 'saved' | 'dismissed'
   dialog: { open: false, busy: false, picks: {}, trigger: null, done: null },
+  gmailConfirm: false, // Setup: "Disconnect Gmail?" shown
+  gmailBusy: false,
+  capture: { text: '', url: '', channel: '', busy: false }, // Setup "Paste a post" (typed text survives re-renders)
 };
 
 /* ---------- API ---------- */
@@ -903,6 +907,7 @@ async function loadSetup() {
   DATA.schedule = d.schedule;
   DATA.runs = d.runs;
   DATA.caps = d.caps;
+  DATA.gmail = d.gmail;
 }
 
 const LOAD = { today: loadToday, pipeline: loadPipeline, intel: loadIntel, setup: loadSetup };
@@ -1213,8 +1218,8 @@ function replyDetail(r) {
   </div>
 
   <div class="inset">
-    <div class="card-row meta"><span>${esc(r.source)} · “${esc(r.channel)}” · ${r.ageH}h ago</span>${extLink(r.url, 'Open post')}</div>
-    <p class="meta mono wrap">${esc(r.author)}</p>
+    <div class="card-row meta"><span>${esc(r.source)} · “${esc(r.channel)}” · ${r.ageH}h ago</span>${r.url ? extLink(r.url, 'Open post') : ''}</div>
+    ${r.author ? `<p class="meta mono wrap">${esc(r.author)}</p>` : ''}
     <blockquote class="quote"${langAttr(r.lang)}>${esc(r.text)}</blockquote>
     <div class="card-row meta">${r.flags.map(f => `<span class="chip">${esc(f)}</span>`).join('')}<span class="mono">confidence ${r.confidence.toFixed(2)}</span><span class="inline-icon${r.expiresH <= 2 ? ' text-warn' : ''}">${ICON_CLOCK}expires in ${r.expiresH}h</span></div>
   </div>
@@ -1575,6 +1580,70 @@ function funnelHtml() {
   return `<p class="funnel">${item('fetched', f.fetched)}${dot}${item('signals', f.signals)}${dot}${item('actions', f.actions)}${dot}${item('cost', f.cost)}</p>`;
 }
 
+/* Gmail connection for the Facebook & LinkedIn group source. Connect is a plain link: the server redirects to Google. */
+function gmailCard() {
+  const g = DATA.gmail;
+  if (!g) return '';
+  let chip = '<span class="chip">Off</span>';
+  let line = '';
+  let action = '';
+  if (g.state === 'not_configured') {
+    chip = '<span class="chip chip-warn">Not set up</span>';
+    line = 'Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env, then restart the UI. See README.';
+  } else if (g.state === 'not_connected') {
+    line = `Reads the label “${esc(g.label)}” once a day. Redirect URI: <span class="mono">${esc(g.redirect_uri)}</span>`;
+    action = '<a class="btn btn-primary" id="gmail-connect" href="/api/gmail/auth">Connect Gmail</a>';
+  } else if (g.state === 'needs_reconnect') {
+    chip = '<span class="chip chip-warn">Needs reconnect</span>';
+    line = 'Google refused the saved token (revoked or expired). Reconnect to resume.';
+    action = '<a class="btn btn-primary" id="gmail-connect" href="/api/gmail/auth">Reconnect Gmail</a>';
+  } else {
+    chip = '<span class="chip chip-good">Connected</span>';
+    line = `${esc(g.email || 'Connected')} · label “${esc(g.label)}”`;
+    if (!state.gmailConfirm) action = '<button type="button" class="btn btn-ghost" data-action="gmail-disconnect" data-arg="">Disconnect</button>';
+  }
+  const busy = state.gmailBusy;
+  const confirm = g.state === 'connected' && state.gmailConfirm
+    ? `<div class="stack-8" role="group" aria-labelledby="gmail-confirm-label">
+      <p class="meta" id="gmail-confirm-label">Disconnect Gmail? Group posts stop until you connect again.</p>
+      <div class="pill-row"><button type="button" class="btn btn-ghost" data-action="gmail-disconnect-confirm" data-arg=""${busy ? ' aria-disabled="true" aria-busy="true"' : ''}>${busy ? 'Disconnecting…' : 'Disconnect'}</button><button type="button" class="btn btn-text" data-action="gmail-disconnect-cancel" data-arg="">Cancel</button></div>
+    </div>`
+    : '';
+  return `<div class="card">
+    <div class="card-foot">
+      <div class="stack-4">
+        <div class="card-row"><span class="strong">Gmail</span>${chip}</div>
+        <p class="meta wrap">${line}</p>
+      </div>
+      ${action}
+    </div>
+    ${confirm}
+  </div>`;
+}
+
+function captureButton() {
+  const busy = state.capture.busy;
+  return `<button type="button" class="btn btn-primary" data-action="capture-save" data-arg=""${busy ? ' aria-disabled="true" aria-busy="true"' : ''}>${busy ? 'Saving…' : 'Save'}</button>`;
+}
+
+function syncCapture() {
+  keep(() => {
+    const el = $('capture-btn');
+    if (el) el.innerHTML = captureButton();
+  });
+}
+
+/* "Paste a post": a group post you saw yourself, stored as a mail item. Field values live in state.capture. */
+function captureCard() {
+  const c = state.capture;
+  const body = `<textarea class="field field-area" id="capture-text" rows="5" aria-label="Post text" placeholder="Paste the post text (at least 20 characters)" data-input="capture" data-arg="text">${esc(c.text)}</textarea>
+    <input class="field" type="url" inputmode="url" id="capture-url" aria-label="Link to the post (optional)" placeholder="Link to the post (optional)" value="${esc(c.url)}" data-input="capture" data-arg="url">
+    <input class="field" type="text" id="capture-channel" aria-label="Group name (optional)" placeholder="Group name (optional)" value="${esc(c.channel)}" data-input="capture" data-arg="channel">
+    <div><span id="capture-btn">${captureButton()}</span></div>
+    <p class="meta">Saved posts are scored in the next daily run.</p>`;
+  return `<div class="card disclosures">${disclosure('capture', 'Paste a post', body)}</div>`;
+}
+
 function setupView() {
   const f = DATA.funnel || { bySource: '', signals: 0, actions: 0 };
   const sources = DATA.sources.map(s => {
@@ -1584,7 +1653,7 @@ function setupView() {
       : st === 'off' ? '<span class="chip">Off</span>'
       : '<span class="chip chip-warn">Unavailable</span>';
     const noteId = `src-note-${sid}`;
-    return `<li class="row" data-config-hint="${s.id === 'reddit' ? '.env' : 'products.yaml'}"><div class="card-line">
+    return `<li class="row" data-config-hint="${s.id === 'reddit' || s.id === 'mail' ? '.env' : 'products.yaml'}"><div class="card-line">
       <div class="grow stack-4">
         <div class="card-row"><span class="strong" id="src-name-${sid}">${esc(s.name)}</span>${chip}</div>
         ${s.last ? `<p class="mono meta">${esc(s.last)}</p>` : ''}
@@ -1636,6 +1705,12 @@ function setupView() {
     <h2 class="eyebrow" id="h-sources">Sources</h2>
     <div class="card"><ul class="rows">${sources}</ul></div>
     <p class="meta">Read-only here. Sources follow products.yaml and .env; the next run picks up changes.</p>
+  </section>
+
+  <section class="section" aria-labelledby="h-gmail">
+    <h2 class="eyebrow" id="h-gmail">Gmail (Facebook &amp; LinkedIn groups)</h2>
+    ${gmailCard()}
+    ${captureCard()}
   </section>
 
   <section class="section" aria-labelledby="h-plays">
@@ -1755,7 +1830,8 @@ function focusTodayFallback() {
 const loaded = {};
 let loadSeq = 0;
 async function applyHash() {
-  const h = location.hash.replace('#', '');
+  // "#setup?gmail=connected" (or =error&reason=…) is where the Gmail OAuth callback lands.
+  const [h, q = ''] = location.hash.replace('#', '').split('?');
   const t = TABS.includes(h) ? h : 'today';
   const changed = t !== state.tab;
   if (state.dialog.open) closeDialog(false);
@@ -1784,6 +1860,13 @@ async function applyHash() {
   if (seq !== loadSeq) return;
   render();
   if (changed) window.scrollTo(0, 0);
+  const gmail = q ? new URLSearchParams(q).get('gmail') : null;
+  if (gmail) {
+    const reason = new URLSearchParams(q).get('reason') || 'unknown';
+    toast(gmail === 'connected' ? 'Gmail connected' : `Gmail connect failed (${reason})`);
+    // Drop the query so a reload does not toast again (replaceState fires no hashchange).
+    history.replaceState(null, '', `#${t}`);
+  }
 }
 function go(tab) {
   if (location.hash === `#${tab}`) applyHash();
@@ -2153,6 +2236,66 @@ const ACTIONS = {
   'edit-product'() {
     toast('Edit products.yaml in the repo');
   },
+
+  /* Setup: Gmail disconnect (inline confirm) and "Paste a post" */
+  'gmail-disconnect'() {
+    state.gmailConfirm = true;
+    render('[data-action="gmail-disconnect-confirm"]');
+  },
+  'gmail-disconnect-cancel'() {
+    state.gmailConfirm = false;
+    render('[data-action="gmail-disconnect"]');
+  },
+  async 'gmail-disconnect-confirm'() {
+    if (state.gmailBusy) return;
+    state.gmailBusy = true;
+    render();
+    let ok = false;
+    try {
+      await api('/api/gmail/disconnect', {});
+      ok = true;
+      await loadSetup();
+    } catch (e) {
+      toast(e.message);
+    }
+    state.gmailBusy = false;
+    if (ok) {
+      state.gmailConfirm = false;
+      toast('Gmail disconnected');
+    }
+    render(ok ? '#gmail-connect' : null);
+  },
+  async 'capture-save'() {
+    const c = state.capture;
+    if (c.busy) return;
+    const text = c.text.trim();
+    if (text.length < 20) {
+      toast('Paste at least 20 characters of the post');
+      restore('#capture-text');
+      return;
+    }
+    c.busy = true;
+    syncCapture();
+    try {
+      const body = { text };
+      if (c.url.trim()) body.url = c.url.trim();
+      if (c.channel.trim()) body.channel = c.channel.trim();
+      const res = await api('/api/capture', body);
+      toast(res.duplicate ? 'Already saved' : 'Saved. Scored in the next run.');
+      c.text = '';
+      c.url = '';
+      c.channel = '';
+      ['capture-text', 'capture-url', 'capture-channel'].forEach(id => {
+        const el = $(id);
+        if (el) el.value = '';
+      });
+    } catch (e) {
+      toast(e.message);
+    } finally {
+      c.busy = false;
+      syncCapture();
+    }
+  },
 };
 
 /* ---------- Events ---------- */
@@ -2186,6 +2329,8 @@ document.addEventListener('input', e => {
     state.reply[id].direction = t.value;
   } else if (kind === 'note') {
     state.lead[id].note = t.value;
+  } else if (kind === 'capture' && (id === 'text' || id === 'url' || id === 'channel')) {
+    state.capture[id] = t.value;
   }
 });
 

@@ -5,7 +5,7 @@ import { DB_PATH, SLOW_WINDOW_S, SOCIAL_WINDOW_S } from "./config.ts";
 
 export type Item = {
   id: string;
-  source: "reddit" | "hn" | "appstore" | "rss" | "bluesky";
+  source: "reddit" | "hn" | "appstore" | "rss" | "bluesky" | "mail";
   kind: "post" | "comment" | "review" | "article";
   url: string;
   title: string;
@@ -13,7 +13,7 @@ export type Item = {
   author: string;
   /**
    * Channel label: subreddit, 'hn', search phrase for Bluesky posts, competitor app name for reviews,
-   * query or feed name for articles.
+   * query or feed name for articles, group name for mail (Facebook/LinkedIn group notifications and pasted posts).
    */
   subreddit: string;
   parent_id: string | null;

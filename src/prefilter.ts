@@ -19,12 +19,18 @@ type ProductMatcher = {
   problems: Cluster[];
   notFor: Cluster[];
 };
-export type Matchers = { products: ProductMatcher[]; nonEnglishChannels: Set<string> };
+export type Matchers = {
+  products: ProductMatcher[];
+  nonEnglishChannels: Set<string>;
+  /** Ids of products with mail.enabled: every mail item (group post) is hinted to them. */
+  mailProducts: Set<string>;
+};
 
 const MIN_LEN_POST = 80;
 const MIN_LEN_COMMENT = 120;
 const MIN_LEN_REVIEW = 20;
 const MIN_LEN_ARTICLE = 40;
+const MIN_LEN_MAIL = 20;
 const PHRASE_HIT_CAP = 2;
 
 export const INTENT_RE =
@@ -110,6 +116,7 @@ export function compileMatchers(cfg: Config): Matchers {
   ]);
   return {
     nonEnglishChannels,
+    mailProducts: new Set(products.filter((p) => p.mail.enabled).map((p) => p.id)),
     products: products.map((p) => ({
       id: p.id,
       channels: new Set([
@@ -149,14 +156,25 @@ const quote = (s: string) => `"${s.length > 40 ? `${s.slice(0, 40)}…` : s}"`;
 /**
  * Pure keyword prefilter. For comments, matching uses the comment body only;
  * the parent title (stored as title) is context, not the author's own words.
+ * Mail items (Facebook/LinkedIn group posts, hand-picked groups) skip the language gate and always pass,
+ * hinted to the products with mail.enabled.
  */
 export function prefilterItem(item: Item, m: Matchers, now: number): PrefilterResult {
   const isPost = item.kind === "post";
   const isComment = item.kind === "comment";
   const isSocial = isPost || isComment;
-  // Bluesky titles are the first line of the body, so the body alone is the author's text.
-  const own = isComment || item.source === "bluesky" ? item.body : `${item.title}\n${item.body}`;
-  const minLen = isPost ? MIN_LEN_POST : isComment ? MIN_LEN_COMMENT : item.kind === "review" ? MIN_LEN_REVIEW : MIN_LEN_ARTICLE;
+  const isMail = item.source === "mail";
+  // Bluesky and mail titles are the first line of the body, so the body alone is the author's text.
+  const own = isComment || item.source === "bluesky" || isMail ? item.body : `${item.title}\n${item.body}`;
+  const minLen = isMail
+    ? MIN_LEN_MAIL
+    : isPost
+      ? MIN_LEN_POST
+      : isComment
+        ? MIN_LEN_COMMENT
+        : item.kind === "review"
+          ? MIN_LEN_REVIEW
+          : MIN_LEN_ARTICLE;
   const reject = (reason: string, lang: "en" | "other" = "en"): PrefilterResult => ({
     pass: false,
     localScore: 0,
@@ -178,7 +196,7 @@ export function prefilterItem(item: Item, m: Matchers, now: number): PrefilterRe
 
   const lang = detectLang(own);
   const key = channelKey(item.source, item.subreddit);
-  if (lang === "other" && !m.nonEnglishChannels.has(key)) return reject("non-English", "other");
+  if (lang === "other" && !isMail && !m.nonEnglishChannels.has(key)) return reject("non-English", "other");
   if (isPost && isPromotional(item.body)) return reject("promotional", lang);
 
   if (item.kind === "review") {
@@ -194,9 +212,15 @@ export function prefilterItem(item: Item, m: Matchers, now: number): PrefilterRe
     };
   }
 
+  if (isMail && m.mailProducts.size === 0) return reject("mail: no product has mail enabled", lang);
+
   const intent = INTENT_RE.test(own);
   let base = 0;
   const why: string[] = [];
+  if (isMail) {
+    base += 1;
+    why.push("group mail");
+  }
   if (intent) {
     base += 2;
     why.push("intent");
@@ -210,7 +234,9 @@ export function prefilterItem(item: Item, m: Matchers, now: number): PrefilterRe
     why.push("Ask HN");
   }
 
-  const perProduct = m.products.map((p) => {
+  // Mail items are only matched against (and hinted to) the products with mail.enabled.
+  const candidates = isMail ? m.products.filter((p) => m.mailProducts.has(p.id)) : m.products;
+  const perProduct = candidates.map((p) => {
     let score = 0;
     const hits: string[] = [];
     for (const ph of p.phrases.filter((ph) => ph.re.test(own)).slice(0, PHRASE_HIT_CAP)) {
@@ -229,7 +255,7 @@ export function prefilterItem(item: Item, m: Matchers, now: number): PrefilterRe
         hits.push(`not_for ${quote(c.text)}`);
       }
     }
-    return { id: p.id, score, hits, inChannel: p.channels.has(key) };
+    return { id: p.id, score, hits, inChannel: p.channels.has(key) || isMail };
   });
 
   const best = Math.max(0, ...perProduct.map((p) => p.score));
@@ -242,7 +268,8 @@ export function prefilterItem(item: Item, m: Matchers, now: number): PrefilterRe
   const inProductChannel = perProduct.some((p) => p.inChannel);
   // Without a phrase/problem hit, only intent in one of a product's own channels passes;
   // "?" and "Ask HN" add to the score but never pass an item on their own.
-  const pass = best > 0 ? localScore >= 2 : inProductChannel && intent;
+  // Mail: the groups were chosen by hand, so every post goes to scoring.
+  const pass = isMail ? true : best > 0 ? localScore >= 2 : inProductChannel && intent;
   const details = [...why, ...ranked.flatMap((p) => p.hits.map((h) => `${p.id}: ${h}`))];
   return {
     pass,

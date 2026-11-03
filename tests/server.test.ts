@@ -1,9 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import { isoWeek, localDate } from "../src/config.ts";
+import { GMAIL_TOKEN_PATH, UI_PORT, isoWeek, localDate } from "../src/config.ts";
 import { actionsFor, getLead, insertDraft, insertIdeas } from "../src/db.ts";
+import { clearToken, deps, readToken } from "../src/mail/gmail.ts";
 import { createServer } from "../src/server.ts";
 import { minimalConfig, nowS, seedEntity, seedItem, seedLead, seedScore, tempDb } from "./helpers.ts";
+import { GOOGLE_ENV, clearGoogleEnv, setGoogleEnv } from "./mail-fixtures.ts";
 
 // Ids with ":" and "/" on purpose: the UI sends them encodeURIComponent-ed and the server decodes them.
 const REPLY_ID = "reddit:t3_abc/def";
@@ -246,6 +248,160 @@ describe("errors", () => {
 
   test("a foreign Host header is refused (DNS rebinding)", async () => {
     const r = await fetch(`${base}/api/today`, { headers: { host: "evil.example" } });
+    expect(r.status).toBe(403);
+  });
+});
+
+describe("gmail", () => {
+  const realFetch = deps.fetch;
+  /** No redirect following: the tests read the 302 Location. */
+  const raw = (path: string) => fetch(base + path, { redirect: "manual" });
+
+  afterEach(() => {
+    deps.fetch = realFetch;
+    clearGoogleEnv();
+    clearToken();
+  });
+
+  test("auth is 503 without a Google client; the source is unavailable", async () => {
+    const r = await raw("/api/gmail/auth");
+    expect(r.status).toBe(503);
+    expect(typeof ((await r.json()) as Json).error).toBe("string");
+    const setup = (await get("/api/setup")).body;
+    expect(setup.gmail.state).toBe("not_configured");
+    expect(setup.sources.find((s: Json) => s.id === "mail").status).toBe("unavailable");
+  });
+
+  test("auth redirects to Google's consent screen with a state", async () => {
+    setGoogleEnv();
+    const r = await raw("/api/gmail/auth");
+    expect(r.status).toBe(302);
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    const loc = new URL(r.headers.get("location") ?? "");
+    expect(loc.host).toBe("accounts.google.com");
+    expect(loc.searchParams.get("client_id")).toBe(GOOGLE_ENV.GOOGLE_CLIENT_ID);
+    expect(loc.searchParams.get("redirect_uri")).toBe(`http://127.0.0.1:${UI_PORT}/api/gmail/callback`);
+    expect(loc.searchParams.get("state")?.length ?? 0).toBeGreaterThan(10);
+    expect(loc.searchParams.has("client_secret")).toBe(false);
+  });
+
+  test("callback: unknown state is refused, also with an error; Google's error needs a known state", async () => {
+    let r = await raw("/api/gmail/callback?state=nope&code=abc");
+    expect(r.status).toBe(302);
+    expect(r.headers.get("location")).toBe("/#setup?gmail=error&reason=state");
+    r = await raw("/api/gmail/callback?error=access_denied&state=nope");
+    expect(r.status).toBe(302);
+    expect(r.headers.get("location")).toBe("/#setup?gmail=error&reason=state");
+
+    setGoogleEnv();
+    const auth = await raw("/api/gmail/auth");
+    const state = new URL(auth.headers.get("location") ?? "").searchParams.get("state") ?? "";
+    r = await raw(`/api/gmail/callback?error=access_denied&state=${enc(state)}`);
+    expect(r.headers.get("location")).toBe("/#setup?gmail=error&reason=access_denied");
+    // The state was used up.
+    r = await raw(`/api/gmail/callback?error=access_denied&state=${enc(state)}`);
+    expect(r.headers.get("location")).toBe("/#setup?gmail=error&reason=state");
+  });
+
+  test("at most 20 pending states: minting more drops the oldest", async () => {
+    setGoogleEnv();
+    const states: string[] = [];
+    for (let i = 0; i < 21; i++) {
+      const r = await raw("/api/gmail/auth");
+      states.push(new URL(r.headers.get("location") ?? "").searchParams.get("state") ?? "");
+    }
+    const oldest = await raw(`/api/gmail/callback?error=access_denied&state=${enc(states[0]!)}`);
+    expect(oldest.headers.get("location")).toBe("/#setup?gmail=error&reason=state");
+    const newest = await raw(`/api/gmail/callback?error=access_denied&state=${enc(states[20]!)}`);
+    expect(newest.headers.get("location")).toBe("/#setup?gmail=error&reason=access_denied");
+  });
+
+  test("connect flow, setup status, state replay and disconnect", async () => {
+    setGoogleEnv();
+    const auth = await raw("/api/gmail/auth");
+    const state = new URL(auth.headers.get("location") ?? "").searchParams.get("state") ?? "";
+    expect(state).not.toBe("");
+
+    const calls: string[] = [];
+    deps.fetch = async (input, init) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === "https://oauth2.googleapis.com/token") {
+        const body = new URLSearchParams(String(init?.body ?? ""));
+        if (body.get("code") !== "the-code" || body.get("grant_type") !== "authorization_code") {
+          return Response.json({ error: "invalid_request" }, { status: 400 });
+        }
+        return Response.json({ access_token: "a-1", refresh_token: "r-1", expires_in: 3600 });
+      }
+      if (url.endsWith("/gmail/v1/users/me/profile")) return Response.json({ emailAddress: "me@example.com" });
+      return Response.json({ error: { message: "unexpected" } }, { status: 500 });
+    };
+
+    const cb = await raw(`/api/gmail/callback?state=${enc(state)}&code=the-code`);
+    expect(cb.status).toBe(302);
+    expect(cb.headers.get("location")).toBe("/#setup?gmail=connected");
+    const saved = readToken();
+    expect(saved?.refresh_token).toBe("r-1");
+    expect(saved?.email).toBe("me@example.com");
+    expect(calls).toHaveLength(2);
+
+    const replay = await raw(`/api/gmail/callback?state=${enc(state)}&code=the-code`);
+    expect(replay.headers.get("location")).toBe("/#setup?gmail=error&reason=state");
+    expect(calls).toHaveLength(2);
+
+    const setup = (await get("/api/setup")).body;
+    expect(setup.gmail.state).toBe("connected");
+    expect(setup.gmail.email).toBe("me@example.com");
+    const row = setup.sources.find((s: Json) => s.id === "mail");
+    expect(row.status).toBe("on");
+    expect(row.note).toContain('label "Signals"');
+
+    expect((await post("/api/gmail/disconnect")).body).toEqual({ ok: true });
+    expect(existsSync(GMAIL_TOKEN_PATH)).toBe(false);
+    expect((await get("/api/setup")).body.gmail.state).toBe("not_connected");
+  });
+});
+
+describe("capture", () => {
+  const TEXT = "Hej alle, hvad bruger I til vagtplaner i jeres forening? Vi drukner i regneark.";
+
+  test("validation", async () => {
+    expect((await post("/api/capture", { text: "for kort" })).status).toBe(400);
+    expect((await post("/api/capture", { text: 5 })).status).toBe(400);
+    expect((await post("/api/capture", { text: "x".repeat(5001) })).status).toBe(400);
+    expect((await post("/api/capture", { text: TEXT, url: "javascript:alert(1)" })).status).toBe(400);
+    expect((await post("/api/capture", { text: TEXT, url: "not a url" })).status).toBe(400);
+    expect((await post("/api/capture", { text: TEXT, url: `https://example.com/${"x".repeat(500)}` })).status).toBe(400);
+    expect((await post("/api/capture", { text: TEXT, channel: 5 })).status).toBe(400);
+  });
+
+  test("stores a mail item without author; a repeat is a duplicate", async () => {
+    const url = "https://www.facebook.com/groups/1/posts/2/";
+    const r = await post("/api/capture", { text: `  ${TEXT}  `, url, channel: " Foreningsledere DK " });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+    expect(r.body.duplicate).toBe(false);
+    expect(r.body.note).toBe("Scored in the next daily run");
+    expect(r.body.id.startsWith("mail:paste:")).toBe(true);
+    const row = t.db
+      .query<{ source: string; kind: string; author: string; found_via: string; subreddit: string; body: string; url: string }, [string]>(
+        "SELECT source, kind, author, found_via, subreddit, body, url FROM items WHERE id = ?",
+      )
+      .get(r.body.id);
+    expect(row).toEqual({ source: "mail", kind: "post", author: "", found_via: "paste", subreddit: "Foreningsledere DK", body: TEXT, url });
+
+    const again = await post("/api/capture", { text: TEXT });
+    expect(again.status).toBe(200);
+    expect(again.body.duplicate).toBe(true);
+    expect(again.body.id).toBe(r.body.id);
+  });
+
+  test("cross-origin capture is refused", async () => {
+    const r = await fetch(`${base}/api/capture`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://evil.example" },
+      body: JSON.stringify({ text: TEXT }),
+    });
     expect(r.status).toBe(403);
   });
 });

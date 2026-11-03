@@ -37,6 +37,9 @@ products:
     bluesky:
       enabled: true
       danish_phrases: ["faktura freelancer", "rykke for betaling"]
+    # Facebook/LinkedIn group posts read from Gmail notifications (needs GOOGLE_CLIENT_ID/SECRET and Connect Gmail
+    # in the UI). Every group post is hinted to the products with mail enabled; false leaves this product out.
+    mail: { enabled: true }
     # Competitor apps whose App Store reviews are collected (id = the number in the apps.apple.com URL).
     competitors:
       - name: Competitor Invoices

@@ -1,8 +1,8 @@
 # SocialSelling: validation layer
 
-Read-only social listening. Once a day it pulls recent items from five sources (Reddit, Hacker News and Bluesky posts and comments, App Store reviews of competitor apps, and news/feed articles), keeps the ones that look like someone has a problem one of the products in `products.yaml` solves (or that say something useful about a competitor), has Claude classify them, turns the best of them into plays (reply drafts, researched leads, competitor ideas), and writes `reports/YYYY-MM-DD.md`. A local web UI shows the day's work. It never posts, replies or votes: you post drafts by hand.
+Read-only social listening. Once a day it pulls recent items from six sources (Reddit, Hacker News and Bluesky posts and comments, Facebook and LinkedIn group posts via Gmail notifications, App Store reviews of competitor apps, and news/feed articles), keeps the ones that look like someone has a problem one of the products in `products.yaml` solves (or that say something useful about a competitor), has Claude classify them, turns the best of them into plays (reply drafts, researched leads, competitor ideas), and writes `reports/YYYY-MM-DD.md`. A local web UI shows the day's work. It never posts, replies or votes: you post drafts by hand.
 
-Pipeline: sources (Reddit, HN, Bluesky, App Store, Bing News/RSS; each source is a strategy in `src/strategies/`) → SQLite (`data/social.db`) → keyword prefilter → optional thread context → triage: Claude scoring (Haiku, batches of 10) → plays (`src/plays/`: reply drafts, entity extraction, lead research, competitor intel) → markdown report + `data/stats.jsonl` → UI (`bun run ui`).
+Pipeline: sources (Reddit, HN, Bluesky, Facebook/LinkedIn groups via Gmail, App Store, Bing News/RSS; each source is a strategy in `src/strategies/`) → SQLite (`data/social.db`) → keyword prefilter → optional thread context → triage: Claude scoring (Haiku, batches of 10) → plays (`src/plays/`: reply drafts, entity extraction, lead research, competitor intel) → markdown report + `data/stats.jsonl` → UI (`bun run ui`).
 
 ## Setup
 
@@ -31,10 +31,16 @@ cp products.example.yaml products.yaml  # describe your products (git-ignored)
 | `UI_PORT` | `8787` | port of the local web UI |
 | `DB_PATH` | `data/social.db` | SQLite file (tests point it at a temp dir) |
 | `SALGSRO_DIR` | `data/salgsro` | where "Add to Salgsro" writes its CSV files |
+| `GOOGLE_CLIENT_ID` | (none) | Google OAuth client id for reading Gmail; without it the Facebook & LinkedIn source is skipped |
+| `GOOGLE_CLIENT_SECRET` | (none) | Google OAuth client secret |
+| `GOOGLE_REDIRECT_URI` | `http://127.0.0.1:${UI_PORT}/api/gmail/callback` | only to override; must match the client's authorized redirect URI exactly |
+| `MAIL_LABEL` | `Signals` | Gmail label your notification filter applies (name match is case-insensitive) |
+| `MAIL_MAX_PER_RUN` | `50` | Gmail messages read per run |
+| `GMAIL_TOKEN_PATH` | `data/gmail-token.json` | Gmail token file, mode 0600 (tests point it at a temp dir) |
 
 ## Sources
 
-A source whose config is missing is skipped with a one-line note in the report (for example "appstore skipped: no competitors[].app_store in products.yaml"); the other sources run as usual. The report's notes also list how many items each source fetched. App Store, Bluesky and RSS requests share one polite fetcher: at least 1s between requests to the same host, 20s timeout, no retries.
+A source whose config is missing is skipped with a one-line note in the report (for example "appstore skipped: no competitors[].app_store in products.yaml" or "mail skipped: Gmail not connected …"); the other sources run as usual. The report's notes also list how many items each source fetched. App Store, Bluesky and RSS requests share one polite fetcher: at least 1s between requests to the same host, 20s timeout, no retries.
 
 ### Reddit
 
@@ -58,6 +64,26 @@ The public Algolia HN search API, no key needed: up to 20 `search_phrases` (roun
 ### Bluesky
 
 The public AT Protocol AppView at `api.bsky.app` (`app.bsky.feed.searchPosts`), no key or account needed: up to 20 `search_phrases` (round-robin across products) plus up to 20 `bluesky.danish_phrases` searched with `lang=da`. Each phrase fetches the 50 latest posts (`sort=latest`) from the last 36h (one page of 50 per phrase, no pagination), at 1 request/s. Replies are kept only when the phrase itself appears in the reply; posts from the top-level `bluesky.own_handles` are skipped. `public.api.bsky.app` returns 403 for search, which is why `api.bsky.app` is used. Set `bluesky.enabled: false` on a product to leave its phrases out, or `bluesky.enabled: false` at the top level to turn the source off.
+
+### Facebook & LinkedIn via Gmail
+
+Facebook and LinkedIn have no API for reading group posts. Both can email you a notification for every new post in a group, though. Those mails get a Gmail label, and once a day the run reads that label through the Gmail API with read-only access (`gmail.readonly`). It never posts, never touches Facebook or LinkedIn, and never changes anything in Gmail (no marking as read, no moving, no deleting).
+
+**1. Google Cloud OAuth client.** Either use the Salgsro project (its consent screen is already published and verified for `gmail.readonly`; check under Google Auth Platform that it really says Published before relying on it) or create a new project with an External consent screen, add the scope `gmail.readonly` and **publish** it: while a consent screen is in "Testing", Google expires refresh tokens after 7 days and the UI will show "Needs reconnect" every week. Then: Credentials → Create credentials → OAuth client ID → Web application → Authorized redirect URI exactly `http://127.0.0.1:8787/api/gmail/callback` (your `UI_PORT`). Creating a new client in the Salgsro project does not change Salgsro's own client; do not reuse its id or secret. Put the new id and secret in `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; set `GOOGLE_REDIRECT_URI` only to override the default.
+
+**2. Connect.** `bun run ui` → Setup → Connect Gmail → pick the account and allow read access → back in Setup it says "Connected" with the address. The token is stored in `data/gmail-token.json` (mode 0600, git-ignored). Disconnect deletes that file; to withdraw the access at Google as well, remove the app at https://myaccount.google.com/permissions.
+
+**3. Gmail filter → label.** In Gmail, create the label `Signals` (or whatever `MAIL_LABEL` says; the name match is case-insensitive). Then create a filter with From `notification@facebookmail.com OR groups-noreply@linkedin.com` and the action "Apply the label: Signals" (skipping the inbox is up to you).
+
+**4. Facebook.** In each group: ⋯ → Manage notifications → All posts. In Settings → Notifications → Email, make sure group emails are on. Notifications come from `notification@facebookmail.com`.
+
+**5. LinkedIn.** Settings → Notifications → Groups: turn on email for new posts in each group, as individual emails rather than a digest (a digest is one mail with several posts, and only its longest post is kept). Notifications come from `groups-noreply@linkedin.com`.
+
+**What a run does.** It reads at most `MAIL_MAX_PER_RUN` messages from the label that are newer than 2 days and turns each into the post's text, the group name and the link to the post (the Gmail message link when no post link is found). Posts older than 36h are dropped and a message is never imported twice. Comment and reaction notifications are ignored. Because the groups are hand-picked, every group post passes the prefilter (no language or keyword gate, minimum 20 characters) and is hinted to the products with `mail: { enabled: true }` (the default; set `enabled: false` on a product to leave it out), so triage cost grows by at most `MAIL_MAX_PER_RUN` Haiku items a day.
+
+**What is stored.** Post text (up to 1,500 characters), group name, post link, date and the Gmail message id, but no author field. The parser tries to keep the author's name out: it looks for the author (the "X posted in Y" / "X skrev i Y" line, a "X (via Facebook)" sender, or a Subject that starts with the name), removes the author line and lines with just the name, scrubs the name and first name from the text, and never uses a group name that contains it. It was written without a real Facebook or LinkedIn notification at hand, so it can miss a format it has not seen: check the first imported items (Setup, or the `items` table) and, when one parses badly or still carries a name, paste that mail into a test fixture (`tests/mail-fixtures.ts`) and tune `PLATFORMS` in `src/mail/parse.ts`. LinkedIn digests keep only their longest post.
+
+**Paste a post.** For a post you saw yourself (or a group without email notifications): Setup → Paste a post → text, and optionally the link and group name. It is saved as a mail item (`found_via: paste`) and scored by the next daily run, or right away with `bun run daily`. The same works with `POST /api/capture {"text": "…", "url": "…", "channel": "…"}`.
 
 ### App Store reviews
 
@@ -138,7 +164,7 @@ A local web UI over the same database. It listens on 127.0.0.1 only and has **no
 - **Today**: at most 5 things to act on. Reply drafts that have not expired (edit, toggle the no-link variant, redraft with a direction (rewrites the stored draft, not the text you edited in the box), rate, copy, mark as posted, skip with a reason or move to Later), then new leads from the last 7 days (status new, not yet in Salgsro). Every item ends in act, skip or later.
 - **Pipeline**: every lead by score, filtered by class and status. Lead detail has the call brief, pipeline status, a feedback note, score breakdown, signals with sources, digital stack and public contacts, plus "Run research" / "Research again" (1–3 minutes, about $1.4) and "Add to Salgsro".
 - **Intel**: this week's competitor reviews as gaps, praise and switching intent, and the week's ideas (save or dismiss).
-- **Setup**: today's run funnel, sources, plays per product, caps, products and the last runs. Read-only: change `products.yaml` or `.env` and the next run picks it up; restart `bun run ui` for the UI to see the change.
+- **Setup**: today's run funnel, sources, plays per product, caps, products and the last runs. Read-only: change `products.yaml` or `.env` and the next run picks it up; restart `bun run ui` for the UI to see the change. The Gmail card connects or disconnects the mailbox for Facebook & LinkedIn group posts, and "Paste a post" saves a group post by hand (see Sources).
 
 Skips, ratings, posted marks, status changes, notes and idea decisions are stored as actions in the database; skipped and posted items are never drafted again.
 
@@ -172,17 +198,18 @@ Unload with `launchctl bootout gui/$(id -u)/com.socialselling.daily`. The 07:00 
 - `feeds` (top level, default `[]`): `name`, `url`, optional `products` (product ids the feed belongs to, default all) and optional `lang` (default `en`; anything else keeps non-English entries).
 - `bluesky` (per product, optional): `enabled` (default `true`; `false` leaves the product's phrases out of the Bluesky search) and `danish_phrases` (default `[]`): searched with `lang=da`, Bluesky posts found by them may be non-English, and they also count as phrases in the prefilter (+3 each, like `search_phrases`).
 - `bluesky` (top level, optional): `enabled` (default `true`; `false` turns the source off) and `own_handles` (default `[]`): your own Bluesky handles (e.g. `me.bsky.social`, a leading `@` is fine); their posts are skipped.
+- `mail` (per product, optional): `enabled` (default `true`): Facebook and LinkedIn group posts from Gmail are hinted to this product. With every product at `false` the source is skipped.
 - `plays` (per product, optional): `reply_drafts` (default `true`), `lead_research` (default `false`; only for products that sell to organisations, never to individuals) and `competitor_intel` (default `true` when the product lists `competitors`, else `false`). Example: `plays: { reply_drafts: true, lead_research: true, competitor_intel: true }`.
 - `voice` (per product, optional): `examples` (default `[]`; a few replies in your own tone, used as a tone reference and never copied), `never_claim` (default `[]`; things a draft must never claim, such as pricing or integrations you don't have) and `link` (default `null`; the only URL a draft may include, `null` means drafts never link). Drafts only describe what is under `key_features`, so keep that list accurate.
 - Edits take effect on the next run. Changing product text changes the cached system prompt, so the first batch after a change pays the cache write once.
 
 Pass rule: the score is intent (+2) + `?` in a post title (+1) + `Ask HN` (+1) + the best single product's phrase/problem/not_for score. An item with a product hit (best > 0) passes at score 2 or more. An item with no product hit passes only if it comes from one of a product's `subreddits` and matches the intent regex ("is there a", "looking for a", "recommendations", …). Bluesky posts found via one of a product's phrases count as being in that product's channel, so intent alone passes them. HN items and site-wide search results from other subreddits always need a product hit; `?` and `Ask HN` add to the score but never pass an item on their own.
 
-Reviews always pass (if their competitor is in some product's `competitors`): the hint is that product, with score 3 for 3 stars or fewer and 2 otherwise. Articles follow the same rule as posts: they need a phrase/problem hit, or intent plus a channel (news query or feed) mapped to a product. Age windows: 36h for posts and comments, 30 days for reviews and articles. Minimum lengths: 80 characters for posts, 120 for comments, 20 for reviews, 40 for articles.
+Group posts from Gmail (and pasted posts) always pass, whatever their language: score 1 plus any intent and phrase/problem hits, hinted to the products with `mail.enabled`. Reviews always pass (if their competitor is in some product's `competitors`): the hint is that product, with score 3 for 3 stars or fewer and 2 otherwise. Articles follow the same rule as posts: they need a phrase/problem hit, or intent plus a channel (news query or feed) mapped to a product. Age windows: 36h for posts and comments, 30 days for reviews and articles. Minimum lengths: 80 characters for posts, 120 for comments, 20 for reviews and group posts, 40 for articles.
 
 ## Report
 
-`reports/YYYY-MM-DD.md` starts with the funnel, tier and product counts, a "By kind" line (non-irrelevant items split into social, reviews and articles) and a "Plays" line (drafts, researched leads, ideas and the plays' cost), then the week-to-date table. The `asking_for_tool`, `describing_problem` and `passing_mention` sections only list Reddit/HN/Bluesky items. Two extra sections:
+`reports/YYYY-MM-DD.md` starts with the funnel, tier and product counts, a "By kind" line (non-irrelevant items split into social, reviews and articles) and a "Plays" line (drafts, researched leads, ideas and the plays' cost), then the week-to-date table. The `asking_for_tool`, `describing_problem` and `passing_mention` sections only list Reddit/HN/Bluesky items and Facebook/LinkedIn group posts. Two extra sections:
 
 - **Competitor reviews** (shown when any product has `competitors`): one group per competitor with star rating, storefront, tier, product, confidence, a body excerpt and Claude's one-line insight (feature gap, switching reason); irrelevant reviews that still carry an insight are listed as one line each, the rest are only counted.
 - **News & feeds** (shown when any `news_queries` or `feeds` are configured): headline, publication, query or feed, tier and insight; irrelevant articles that still carry an insight are listed as one line each, the rest are only counted.

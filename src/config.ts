@@ -8,6 +8,8 @@ export const DATA_DIR = join(ROOT, "data");
 export const REPORTS_DIR = join(ROOT, "reports");
 export const DB_PATH = process.env.DB_PATH?.trim() || join(DATA_DIR, "social.db");
 export const SALGSRO_DIR = process.env.SALGSRO_DIR?.trim() || join(DATA_DIR, "salgsro");
+/** Gmail OAuth tokens (mode 0600). Google client id/secret, label and cap are read lazily in src/mail/gmail.ts. */
+export const GMAIL_TOKEN_PATH = process.env.GMAIL_TOKEN_PATH?.trim() || join(DATA_DIR, "gmail-token.json");
 export const LOCK_PATH = join(DATA_DIR, "run.lock");
 export const STATS_PATH = join(DATA_DIR, "stats.jsonl");
 export const PRODUCTS_PATH = join(ROOT, "products.yaml");
@@ -84,6 +86,8 @@ const ProductBase = z.object({
       danish_phrases: z.array(z.string().min(1)).default([]),
     })
     .default({ enabled: true, danish_phrases: [] }),
+  /** Facebook/LinkedIn group notifications read from Gmail: every group post is hinted to the products with this on. */
+  mail: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
   plays: PlaysSchema,
   voice: VoiceSchema,
 });

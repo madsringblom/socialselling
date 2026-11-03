@@ -13,14 +13,17 @@ import {
   getLead,
   ideasForWeek,
   insertAction,
+  insertItems,
   scoredItem,
   setLeadNote,
   setLeadStatus,
 } from "./db.ts";
 import type { LeadStatus } from "./db.ts";
+import { STATE_TTL_MS, clearToken, consentUrl, exchangeCode, getGmailConfig, isConfigured, mintState } from "./mail/gmail.ts";
 import { redraft } from "./plays/drafts.ts";
 import { ResearchFailed, researchLead } from "./plays/research.ts";
 import { exportSalgsro } from "./plays/salgsro.ts";
+import { pasteItem } from "./strategies/mail.ts";
 import { errMsg } from "./strategies/shared.ts";
 
 const HOSTNAME = "127.0.0.1";
@@ -29,6 +32,13 @@ const NO_STORE = { "cache-control": "no-store" };
 const SKIP_REASONS = new Set(["not-user", "answered", "wrong-product", "other"]);
 const LEAD_STATUSES: LeadStatus[] = ["new", "contacted", "replied", "meeting", "no_interest"];
 const NOTE_MAX = 10_000;
+const CAPTURE_MIN = 20;
+const CAPTURE_MAX = 5000;
+const CAPTURE_URL_MAX = 500;
+const CAPTURE_CHANNEL_MAX = 100;
+const OAUTH_REASON_MAX = 100;
+/** Pending OAuth states kept per server; minting more drops the oldest. */
+const OAUTH_STATES_MAX = 20;
 
 class HttpError extends Error {
   readonly status: number;
@@ -50,8 +60,11 @@ type Ctx = {
 type Route = {
   method: "GET" | "POST";
   re: RegExp;
+  /** Returns JSON data, or a Response (used for redirects) that is sent as is. */
   handler: (params: string[], body: Body, ctx: Ctx) => unknown;
 };
+/** OAuth state nonce → expiry (ms). One Map per server; a state is used once. */
+type OAuthStates = Map<string, number>;
 
 export type ServerOptions = {
   port: number;
@@ -119,7 +132,52 @@ function currentDraft(itemId: string) {
   return drafts.find((d) => d.variant !== "no_link") ?? drafts[0] ?? null;
 }
 
-function buildRoutes(researching: Set<string>): Route[] {
+function redirect(location: string): Response {
+  return new Response(null, { status: 302, headers: { location, ...NO_STORE } });
+}
+
+/** Back to the UI's Setup tab, which toasts the outcome and strips the query from the hash. */
+function redirectToSetup(flag: "connected" | "error", reason?: string): Response {
+  return redirect(`/#setup?gmail=${flag}${reason ? `&reason=${encodeURIComponent(reason.slice(0, OAUTH_REASON_MAX))}` : ""}`);
+}
+
+/** Validated POST /api/capture body. */
+function captureInput(body: Body): { text: string; url: string | null; channel: string | null } {
+  const rawText = body.text;
+  if (typeof rawText !== "string") throw new HttpError(400, "text must be a string");
+  const text = rawText.trim();
+  if (text.length < CAPTURE_MIN) throw new HttpError(400, `text must be at least ${CAPTURE_MIN} characters`);
+  if (text.length > CAPTURE_MAX) throw new HttpError(400, `text is longer than ${CAPTURE_MAX} characters`);
+
+  let url: string | null = null;
+  const rawUrl = body.url;
+  if (rawUrl !== undefined && rawUrl !== null && rawUrl !== "") {
+    const raw = typeof rawUrl === "string" ? rawUrl.trim() : "";
+    let ok = raw.length > 0 && raw.length <= CAPTURE_URL_MAX;
+    if (ok) {
+      try {
+        const u = new URL(raw);
+        ok = u.protocol === "http:" || u.protocol === "https:";
+      } catch {
+        ok = false;
+      }
+    }
+    if (!ok) throw new HttpError(400, `url must be an http(s) link of at most ${CAPTURE_URL_MAX} characters`);
+    url = raw;
+  }
+
+  let channel: string | null = null;
+  const rawChannel = body.channel;
+  if (rawChannel !== undefined && rawChannel !== null) {
+    if (typeof rawChannel !== "string" || rawChannel.length > CAPTURE_CHANNEL_MAX) {
+      throw new HttpError(400, `channel must be a string of at most ${CAPTURE_CHANNEL_MAX} characters`);
+    }
+    channel = rawChannel.trim() || null;
+  }
+  return { text, url, channel };
+}
+
+function buildRoutes(researching: Set<string>, oauthStates: OAuthStates): Route[] {
   return [
     { method: "GET", re: /^\/api\/today$/, handler: (_p, _b, c) => today(c.cfg, c.now) },
     { method: "GET", re: /^\/api\/pipeline$/, handler: (_p, _b, c) => pipeline(c.cfg, c.now) },
@@ -133,6 +191,74 @@ function buildRoutes(researching: Set<string>): Route[] {
       },
     },
     { method: "GET", re: /^\/api\/setup$/, handler: (_p, _b, c) => setup(c.cfg, c.now) },
+
+    // Gmail OAuth for the mail source. GET (a link in the UI and Google's redirect): only the Host check applies.
+    {
+      method: "GET",
+      re: /^\/api\/gmail\/auth$/,
+      handler: () => {
+        const cfg = getGmailConfig();
+        if (!isConfigured(cfg)) {
+          throw new HttpError(503, "Gmail is not set up: add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env and restart the UI");
+        }
+        const now = Date.now();
+        for (const [s, expires] of oauthStates) if (expires <= now) oauthStates.delete(s);
+        // At most OAUTH_STATES_MAX pending: the oldest goes first (a Map iterates in insertion order).
+        while (oauthStates.size >= OAUTH_STATES_MAX) {
+          const oldest = oauthStates.keys().next().value;
+          if (oldest === undefined) break;
+          oauthStates.delete(oldest);
+        }
+        const state = mintState();
+        oauthStates.set(state, now + STATE_TTL_MS);
+        return redirect(consentUrl(cfg, state));
+      },
+    },
+    {
+      method: "GET",
+      re: /^\/api\/gmail\/callback$/,
+      handler: async (_p, _b, c) => {
+        const q = c.url.searchParams;
+        // Only a state this server minted (unexpired, unused) gets anything but reason=state, Google's error included.
+        const state = q.get("state") ?? "";
+        const expires = state ? oauthStates.get(state) : undefined;
+        if (expires === undefined) return redirectToSetup("error", "state");
+        oauthStates.delete(state); // single use
+        if (expires <= Date.now()) return redirectToSetup("error", "state");
+        const error = q.get("error");
+        if (error) return redirectToSetup("error", error);
+        const code = q.get("code");
+        if (!code) return redirectToSetup("error", "no_code");
+        try {
+          await exchangeCode(code);
+          log("gmail: connected");
+          return redirectToSetup("connected");
+        } catch (e) {
+          // Never log the code; the message is Google's error description.
+          log(`[gmail] connect failed: ${errMsg(e)}`);
+          return redirectToSetup("error", "exchange");
+        }
+      },
+    },
+    {
+      method: "POST",
+      re: /^\/api\/gmail\/disconnect$/,
+      handler: () => {
+        clearToken();
+        log("gmail: disconnected");
+        return { ok: true };
+      },
+    },
+    {
+      method: "POST",
+      re: /^\/api\/capture$/,
+      handler: (_p, body, c) => {
+        const { text, url, channel } = captureInput(body);
+        const item = pasteItem(text, url, channel, c.now);
+        const { inserted, dups } = insertItems([item]);
+        return { ok: true, id: item.id, duplicate: inserted === 0 || dups > 0, note: "Scored in the next daily run" };
+      },
+    },
 
     {
       method: "POST",
@@ -298,7 +424,7 @@ async function handle(req: Request, srv: Server<undefined>, cfg: Config, routes:
         },
       };
       const data = await r.handler(params, body, ctx);
-      return Response.json(data, { headers: NO_STORE });
+      return data instanceof Response ? data : Response.json(data, { headers: NO_STORE });
     }
     throw new HttpError(404, `not found: ${req.method} ${url.pathname}`);
   } catch (e) {
@@ -311,7 +437,7 @@ async function handle(req: Request, srv: Server<undefined>, cfg: Config, routes:
 /** Starts the UI server on 127.0.0.1 (always; never another interface). Config is loaded once, here. */
 export function createServer(opts: ServerOptions): Server<undefined> {
   const cfg = opts.cfg ?? loadConfig(opts.configPath);
-  const routes = buildRoutes(new Set<string>());
+  const routes = buildRoutes(new Set<string>(), new Map<string, number>());
   return Bun.serve<undefined>({
     hostname: HOSTNAME,
     port: opts.port,
